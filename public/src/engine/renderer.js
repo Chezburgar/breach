@@ -379,9 +379,12 @@ export class Renderer {
     if (this._perfGrace > 0) { this._perfGrace--; return; }
 
     const idx = QUALITY_ORDER.indexOf(this.quality);
-    if (fps < 40 && idx > 0) {
+    // Stepping down to 'low' is a big visual sacrifice, so it takes a much
+    // worse frame rate than the first step down does.
+    const threshold = idx > 1 ? 40 : 28;
+    if (fps < threshold && idx > 0) {
       const next = QUALITY_ORDER[idx - 1];
-      this._perfGrace = 3;
+      this._perfGrace = 4;
       this.setQuality(next);
       this.onAutoQuality?.(next, Math.round(fps));
     }
