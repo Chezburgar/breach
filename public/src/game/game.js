@@ -19,6 +19,8 @@ import { RemoteManager } from './remote.js';
 import { ViewModel } from './viewmodel.js';
 import { ScopeRenderer } from './scope.js';
 import { TrainingMode } from './training.js';
+import { GrenadeView } from './grenades.js';
+import { GRENADE_IDS, GRENADE_COOLDOWN, getGrenade } from '/shared/grenades.js';
 import { saveProfile } from '../ui/menu.js';
 
 const PHASE = { NONE: 'none', INTRO: 'intro', WARMUP: 'warmup', LIVE: 'live', OUTRO: 'outro' };
@@ -47,6 +49,15 @@ export class Game {
     this.viewmodel = new ViewModel(this.vmCamera);
     this.scope = new ScopeRenderer(this.renderer, this.renderer.scene, this.vmCamera);
     this.remotes = new RemoteManager(this.renderer.scene);
+    this.grenadeView = new GrenadeView(this.renderer.scene, this.effects, this.audio);
+
+    this.grenadeKind = 'frag';
+    this.grenadeStock = { frag: 1, flash: 1, smoke: 1 };
+    this.grenadeCooldown = 0;
+    this.blindUntil = 0;
+    this.round = 0;
+    this.aliveCounts = [0, 0];
+    this.spectateId = null;
 
     this.input = new Input(canvas, profile.settings);
     this.input.onLockChange = (locked) => this.onLockChange(locked);
@@ -123,10 +134,39 @@ export class Game {
     net.on('streak', (msg) => {
       if (msg.id === net.id) this.hud.streak(`${msg.count} ELIMINATION STREAK`);
     });
-    net.on('capture', (msg) => this.hud.toast(`${msg.name} CAPTURED`, 1600));
-    net.on('flagtake', (msg) => this.hud.toast(`${msg.by.name} TOOK THE FLAG`, 1600));
-    net.on('flagcap', (msg) => this.hud.toast(`${TEAM_INFO[msg.team].name} SCORED`, 1800));
-    net.on('promote', (msg) => this.hud.toast(`PROMOTED — ${getWeapon(msg.weapon).name}`, 1600));
+    net.on('round.start', (msg) => {
+      this.round = msg.round;
+      this.scores = msg.scores;
+      this.grenadeView.clear();
+      this.hud.hideDeath();
+      this.hud.roundBanner(`ROUND ${msg.round}`, this.roundSubtitle(msg.scores), 2200);
+      this.audio.countdownBeep(false);
+    });
+    net.on('round.live', () => {
+      this.hud.toast('GO', 800);
+      this.audio.countdownBeep(true);
+    });
+    net.on('round.end', (msg) => {
+      this.scores = msg.scores;
+      const mine = msg.winner === this.myTeam;
+      const title = msg.winner < 0 ? 'ROUND DRAW' : (mine ? 'ROUND WON' : 'ROUND LOST');
+      this.hud.roundBanner(title, this.roundSubtitle(msg.scores), 4000);
+    });
+
+    net.on('grenade.throw', (msg) => {
+      if (msg.by !== net.id) this.grenadeView.spawn(msg);
+      this.audio.click('reload');
+    });
+    net.on('grenade.pop', (msg) => this.grenadeView.pop(msg));
+    net.on('grenade.used', (msg) => {
+      this.grenadeStock[msg.kind] = 0;
+      this.grenadeCooldown = msg.cooldown;
+      this.selectNextGrenade();
+    });
+    net.on('flashed', (msg) => {
+      this.blindUntil = performance.now() / 1000 + msg.duration;
+      this.audio.tinnitus(msg.duration);
+    });
     net.on('match.end', (msg) => this.endMatch(msg));
     net.on('match.over', () => this.leaveMatch());
     net.on('chat', (msg) => this.menu.toast(`${msg.name}: ${msg.text}`));
@@ -265,6 +305,17 @@ export class Game {
     this.phaseRemaining = msg.rem ?? this.phaseRemaining;
     this.respawnIn = msg.you.respawnIn ?? 0;
     if (msg.you.zone) this.zoneName = msg.you.zone;
+    if (msg.you.nades) this.grenadeStock = msg.you.nades;
+    this.grenadeCooldown = msg.you.nadeCd ?? 0;
+    this.spectateId = msg.you.spectate || null;
+    this.aliveCounts = msg.alive || this.aliveCounts;
+    this.round = msg.round ?? this.round;
+    if (msg.you.blind > 0) {
+      this.blindUntil = Math.max(this.blindUntil, performance.now() / 1000 + msg.you.blind);
+    }
+
+    this.grenadeView.sync(msg.gr?.g);
+    this.grenadeView.syncSmokes(msg.gr?.s);
 
     const me = this.roster.get(this.net.id);
     if (me) {
@@ -308,7 +359,28 @@ export class Game {
       const n = { x: ev.n[0], y: ev.n[1], z: ev.n[2] };
       this.effects.impact(p, n, ev.m);
       this.audio.impact(ev.m, p);
+    } else if (ev.e === 'gbounce') {
+      this.audio.bounce({ x: ev.p[0], y: ev.p[1], z: ev.p[2] }, ev.s);
     }
+  }
+
+  roundSubtitle(scores) {
+    const need = this.match?.roundsToWin ?? 3;
+    return `${TEAM_INFO[0].name} ${scores[0]}  —  ${scores[1]} ${TEAM_INFO[1].name}   ·   FIRST TO ${need}`;
+  }
+
+  selectNextGrenade() {
+    if (this.grenadeStock[this.grenadeKind]) return;
+    const next = GRENADE_IDS.find((k) => this.grenadeStock[k]);
+    if (next) this.grenadeKind = next;
+  }
+
+  throwGrenade() {
+    if (!this.local?.alive) return;
+    if (this.grenadeCooldown > 0) return this.audio.click('error');
+    if (!this.grenadeStock[this.grenadeKind]) return this.audio.click('error');
+    this.net.send({ t: 'grenade', kind: this.grenadeKind, charge: 1 });
+    this.viewmodel.startMelee();   // reuse the throwing arc animation
   }
 
   onKill(msg) {
@@ -459,7 +531,17 @@ export class Game {
       }, this.roster, this.net.id);
     }
 
-    if (!this.local.alive || this.paused) return;
+    // Dead players cycle who they are watching.
+    if (!this.local.alive) {
+      if (input.takeMouseClick()) this.net.send({ t: 'spectate' });
+      return;
+    }
+    if (this.paused) return;
+
+    if (input.wasPressed('grenade')) this.throwGrenade();
+    if (input.wasPressed('nade1')) { this.grenadeKind = 'frag'; this.audio.click('hover'); }
+    if (input.wasPressed('nade2')) { this.grenadeKind = 'flash'; this.audio.click('hover'); }
+    if (input.wasPressed('nade3')) { this.grenadeKind = 'smoke'; this.audio.click('hover'); }
 
     if (input.wasPressed('reload')) {
       const r = this.local.startReload();
@@ -542,8 +624,14 @@ export class Game {
       landDip: this.local.landDip,
     });
 
-    this.local.updateCamera(this.camera, this.vmCamera, dt, this.scope);
-    this.scope.update(this.local.adsBlend, this.camera, this.vmCamera, this.local.fov);
+    if (this.local.alive || this.phase === PHASE.INTRO) {
+      this.local.updateCamera(this.camera, this.vmCamera, dt, this.scope);
+    } else {
+      this.updateSpectatorCamera(dt);
+    }
+    this.scope.update(this.local.alive ? this.local.adsBlend : 0, this.camera, this.vmCamera, this.local.fov);
+    this.viewmodel.holder.visible = this.local.alive;
+    this.grenadeView.update(dt);
 
     this.processLocalEvents();
 
@@ -597,9 +685,37 @@ export class Game {
       }
     }
 
-    if (this.local && !this.local.alive && this.phase === PHASE.LIVE) {
-      this.hud.updateRespawn(this.respawnIn ?? 0);
+  }
+
+  /**
+   * Follow a living teammate from just behind and above their shoulder. Falls
+   * back to a slow orbit if nobody on the team is left standing.
+   */
+  updateSpectatorCamera(dt) {
+    const target = this.spectateId ? this.remotes.get(this.spectateId) : null;
+    if (!target || target.dead) {
+      this.introCamera(dt);
+      return;
     }
+    const p = target.renderPos;
+    const yaw = target.smoothYaw;
+    const back = 2.6, up = 0.9;
+    const want = new THREE.Vector3(
+      p.x + Math.sin(yaw) * back,
+      p.y + 1.5 + up,
+      p.z + Math.cos(yaw) * back
+    );
+    if (!this._specPos) this._specPos = want.clone();
+    this._specPos.lerp(want, 1 - Math.exp(-9 * dt));
+    this.camera.position.copy(this._specPos);
+    this.camera.rotation.order = 'YXZ';
+    this.camera.lookAt(p.x, p.y + 1.35, p.z);
+    if (Math.abs(this.camera.fov - this.local.fov) > 0.1) {
+      this.camera.fov = this.local.fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.vmCamera.position.copy(this.camera.position);
+    this.vmCamera.quaternion.copy(this.camera.quaternion);
   }
 
   /** Slow orbit over the map while the banners are shown. */
@@ -686,6 +802,18 @@ export class Game {
       playerPos: l.state.pos,
       yaw: l.yaw,
       hurt: this.hurtLevel,
+
+      round: this.round,
+      roundsToWin: this.match?.roundsToWin ?? 3,
+      aliveCounts: this.aliveCounts,
+      myTeam: this.myTeam,
+      blind: Math.max(0, this.blindUntil - performance.now() / 1000),
+      grenadeKind: this.grenadeKind,
+      grenadeStock: this.grenadeStock,
+      grenadeCooldown: this.grenadeCooldown,
+      grenadeCooldownMax: GRENADE_COOLDOWN,
+      spectating: !l.alive && this.phase === PHASE.LIVE,
+      spectateName: this.roster.get(this.spectateId)?.name || null,
     });
   }
 

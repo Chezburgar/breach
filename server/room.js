@@ -10,9 +10,12 @@ import { getMap } from '../shared/maps/index.js';
 import { zoneAt } from '../shared/maps/builder.js';
 import { getMode } from '../shared/modes.js';
 import {
-  resolveWeapon, currentSpread, damageAt, GUNGAME_LADDER, getWeapon, sanitizeLoadout,
+  resolveWeapon, currentSpread, damageAt, getWeapon, sanitizeLoadout,
 } from '../shared/weapons.js';
-import { clamp, dirFromAngles, hashString, makeRng, vdist } from '../shared/mathx.js';
+import {
+  GRENADE_COOLDOWN, GRENADE_GRAVITY, getGrenade, fragDamage, flashBlind,
+} from '../shared/grenades.js';
+import { clamp, dirFromAngles, hashString, makeRng, vdist, vnorm, vsub } from '../shared/mathx.js';
 import { buildNavGraph } from './nav.js';
 import { Bot, BOT_NAMES } from './bots.js';
 
@@ -42,10 +45,19 @@ export class GameRoom {
     this.scores = [0, 0];
     this.teamCounts = [0, 0];
     this.snapAccum = 0;
-    this.objectiveState = this.initObjectives();
     this.pendingEvents = [];
     this.disposed = false;
     this.emptySince = 0;
+
+    // Round state. `scores` holds rounds won, not eliminations.
+    this.roundNo = 0;
+    this.roundEndsAt = 0;
+    this.lastRoundWinner = -1;
+    this.roundLog = [];
+
+    this.projectiles = [];
+    this.smokes = [];
+    this.projectileSeq = 0;
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -63,8 +75,9 @@ export class GameRoom {
       map: this.mapId,
       seed: this.seed,
       teams: this.mode.teams ? TEAM_INFO : null,
-      scoreLimit: this.mode.scoreLimit ?? null,
-      timeLimit: this.mode.timeLimit,
+      roundsToWin: this.mode.roundsToWin,
+      maxRounds: this.mode.maxRounds,
+      roundTime: this.mode.roundTime,
       intro: MATCH.introDuration,
       players: roster,
     });
@@ -133,13 +146,16 @@ export class GameRoom {
         t: 'match.start',
         room: this.id, mode: this.mode.id, map: this.mapId, seed: this.seed,
         teams: this.mode.teams ? TEAM_INFO : null,
-        scoreLimit: this.mode.scoreLimit ?? null,
-        timeLimit: this.mode.timeLimit,
+        roundsToWin: this.mode.roundsToWin,
+        maxRounds: this.mode.maxRounds,
+        roundTime: this.mode.roundTime,
         intro: 0,
         players: this.roster(),
         joinInProgress: true,
       });
-      this.respawn(p, true);
+      // Late arrivals sit out the round in progress and deploy with the next.
+      p.alive = false;
+      p.spectating = true;
       this.send(client, this.phaseMessage());
       this.broadcast({ t: 'roster', players: this.roster() });
     }
@@ -200,8 +216,10 @@ export class GameRoom {
       burstLeft: 0,
       switchEnd: 0,
       damagedBy: new Map(),
-      ggIndex: 0,
-      hasFlag: null,
+      spectating: false,
+      spectateTarget: null,
+      grenades: { frag: 1, flash: 1, smoke: 1 },
+      grenadeCooldown: 0,
       zone: '',
       joinedAt: this.time,
     };
@@ -214,31 +232,10 @@ export class GameRoom {
       const rw = resolveWeapon(cfg);
       return { cfg, rw, mag: rw.mag, reserve: rw.reserve };
     };
-    if (this.mode.ladder) {
-      const id = GUNGAME_LADDER[Math.min(p.ggIndex, GUNGAME_LADDER.length - 1)];
-      const def = getWeapon(id);
-      const cfg = { id, scope: def.defaultScope, muzzle: 'none', grip: 'none', laser: 'none' };
-      p.weapons = { primary: build(cfg), secondary: build({ id: 'p226', scope: 'iron' }) };
-      p.slot = 'primary';
-    } else if (this.mode.oneShot) {
-      p.weapons = {
-        primary: build({ id: 'deagle', scope: 'iron', muzzle: 'none' }),
-        secondary: build({ id: 'p226', scope: 'iron' }),
-      };
-      // One round in the chamber, and it always kills. Land it and the shot is
-      // refunded; miss and the knife is all that is left.
-      p.weapons.primary.rw.damage = 250;
-      p.weapons.primary.rw.falloff = { start: 200, end: 400, minMul: 1 };
-      p.weapons.primary.rw.spread = { ...p.weapons.primary.rw.spread, ads: 0.02, hip: 2.2 };
-      p.weapons.primary.mag = 1;
-      p.weapons.primary.reserve = 0;
-      p.weapons.secondary.mag = 0;
-      p.weapons.secondary.reserve = 0;
-      p.slot = 'primary';
-    } else {
-      p.weapons = { primary: build(p.loadout.primary), secondary: build(p.loadout.secondary) };
-      p.slot = 'primary';
-    }
+    p.weapons = { primary: build(p.loadout.primary), secondary: build(p.loadout.secondary) };
+    p.slot = 'primary';
+    p.grenades = { frag: 1, flash: 1, smoke: 1 };
+    p.grenadeCooldown = 0;
   }
 
   fillBots() {
@@ -282,7 +279,8 @@ export class GameRoom {
       phase: this.phase,
       remaining: Math.max(0, this.phaseEnds - this.time),
       scores: this.scores,
-      matchTime: this.mode.timeLimit - this.time,
+      round: this.roundNo,
+      alive: [this.aliveCount(0), this.aliveCount(1)],
     };
   }
 
@@ -299,19 +297,23 @@ export class GameRoom {
 
     switch (this.phase) {
       case 'intro':
-        if (this.time >= this.phaseEnds) {
-          for (const p of this.players.values()) this.respawn(p, true);
-          this.setPhase('warmup', MATCH.warmupDuration);
-        }
+        if (this.time >= this.phaseEnds) this.startRound();
         break;
-      case 'warmup':
+      case 'freeze':
+        // Everyone is alive and placed; movement is locked until the buzzer.
         if (this.time >= this.phaseEnds) {
-          this.matchStartTime = this.time;
-          this.setPhase('live', this.mode.timeLimit);
+          this.setPhase('live', this.mode.roundTime);
+          this.broadcast({ t: 'round.live', round: this.roundNo });
         }
         break;
       case 'live':
-        if (this.time >= this.phaseEnds) this.endMatch(this.timeoutWinner());
+        if (this.time >= this.phaseEnds) this.finishRound(this.roundTimeoutWinner(), 'time');
+        break;
+      case 'roundend':
+        if (this.time >= this.phaseEnds) {
+          if (this.matchDecided()) this.endMatch(this.matchResult());
+          else this.startRound();
+        }
         break;
       case 'outro':
         if (this.time >= this.phaseEnds) {
@@ -324,15 +326,11 @@ export class GameRoom {
     }
 
     const live = this.phase === 'live';
-    const frozen = this.phase === 'intro' || this.phase === 'warmup' || this.phase === 'outro';
+    const frozen = this.phase !== 'live';
 
     for (const p of this.players.values()) {
       if (p.bot) p.bot.think(dt, live);
-
-      if (!p.alive) {
-        if (live && p.respawnAt > 0 && this.time >= p.respawnAt) this.respawn(p);
-        continue;
-      }
+      if (!p.alive) continue;   // no respawns inside a round — you spectate
 
       const cmd = this.nextCommand(p, frozen);
       stepPlayer(p.state, cmd, this.world, FIXED_DT);
@@ -348,8 +346,13 @@ export class GameRoom {
       if (z !== p.zone) p.zone = z;
     }
 
+    if (live) this.stepProjectiles(dt);
+    if (this.smokes.length) {
+      this.smokes = this.smokes.filter((s) => this.time < s.until);
+    }
+
     this.recordHistory();
-    if (live) this.stepMode(dt);
+    if (live) this.checkRoundEnd();
 
     if (!this.players.size) {
       if (!this.emptySince) this.emptySince = this.time;
@@ -539,11 +542,6 @@ export class GameRoom {
       });
     }
 
-    // One in the Chamber: a hit refunds the round, a miss does not.
-    if (this.mode.oneShot) {
-      const slot = p.weapons[p.slot];
-      if (anyKill) slot.mag = Math.min(1, slot.mag + 1);
-    }
   }
 
   /** Deterministic cone sampling — the client reproduces this exactly. */
@@ -734,8 +732,14 @@ export class GameRoom {
     victim.health = 0;
     victim.deaths++;
     victim.streak = 0;
-    victim.respawnAt = this.time + MATCH.respawnDelay;
+    victim.respawnAt = 0;
     victim.pendingReload = null;
+    victim.spectating = true;
+    // Spectate whoever on your side is still up.
+    const mate = [...this.players.values()].find(
+      (q) => q.alive && q.team === victim.team && q !== victim
+    );
+    victim.spectateTarget = mate ? mate.id : null;
 
     const assists = [];
     for (const [id, rec] of victim.damagedBy) {
@@ -746,35 +750,21 @@ export class GameRoom {
     }
     victim.damagedBy.clear();
 
-    if (this.mode.flags) this.dropFlag(victim);
-
-    let promoted = false;
     if (attacker && attacker !== victim) {
       attacker.kills++;
       attacker.streak++;
       attacker.bestStreak = Math.max(attacker.bestStreak, attacker.streak);
-      attacker.score += this.mode.ladder ? 1 : (zone === 'head' ? 2 : 1);
-      if (this.mode.ladder) {
-        attacker.ggIndex++;
-        if (attacker.ggIndex >= GUNGAME_LADDER.length) {
-          this.addScore(attacker, 0);
-          this.endMatch({ kind: 'player', player: attacker });
-          return;
-        }
-        this.equipLoadout(attacker);
-        promoted = true;
-        this.send(attacker.client, { t: 'promote', index: attacker.ggIndex, weapon: GUNGAME_LADDER[attacker.ggIndex] });
-      }
-      this.addScore(attacker, 1);
+      attacker.score += zone === 'head' ? 2 : 1;
     } else {
-      // Suicide or fall damage.
-      if (this.mode.teams && victim.team >= 0) {
-        this.scores[victim.team] = Math.max(0, this.scores[victim.team]);
-      }
       victim.score = Math.max(0, victim.score - 1);
     }
 
-    const payload = {
+    // Anyone now spectating the person who just died follows someone else.
+    for (const q of this.players.values()) {
+      if (q.spectateTarget === victim.id) q.spectateTarget = this.pickSpectateTarget(q);
+    }
+
+    this.broadcast({
       t: 'kill',
       killer: attacker && attacker !== victim ? this.brief(attacker) : null,
       victim: this.brief(victim),
@@ -784,76 +774,226 @@ export class GameRoom {
       distance: Math.round(distance || 0),
       streak: attacker ? attacker.streak : 0,
       assists,
-      promoted,
-      wallbang: false,
       scores: this.scores,
-    };
-    this.broadcast(payload);
+      alive: [this.aliveCount(0), this.aliveCount(1)],
+    });
 
     if (attacker && attacker !== victim && attacker.streak >= 3) {
       this.broadcast({ t: 'streak', id: attacker.id, name: attacker.name, banner: attacker.banner, count: attacker.streak });
     }
-
-    this.checkWin();
   }
 
   brief(p) {
     return { id: p.id, name: p.name, banner: p.banner, level: p.level, team: p.team, bot: !!p.bot };
   }
 
-  addScore(p, n) {
-    if (this.mode.teams && p.team >= 0) this.scores[p.team] += n;
-    else if (!this.mode.teams) this.scores[0] = Math.max(this.scores[0], p.score);
+  // ------------------------------------------------------------- grenades
+  throwGrenade(p, kind, charge = 1) {
+    if (!p.alive || this.phase !== 'live') return;
+    if (this.time < p.grenadeCooldown) return;
+    const def = getGrenade(kind);
+    if (!p.grenades[def.id]) return;
+
+    p.grenades[def.id] = 0;
+    p.grenadeCooldown = this.time + GRENADE_COOLDOWN;
+
+    const eye = eyePosition(p.state);
+    const dir = dirFromAngles(p.cmd.yaw, p.cmd.pitch);
+    const power = def.throwSpeed * clamp(charge, 0.35, 1);
+
+    const proj = {
+      id: `g${this.projectileSeq = (this.projectileSeq || 0) + 1}`,
+      kind: def.id,
+      owner: p.id,
+      team: p.team,
+      pos: { x: eye.x + dir.x * 0.4, y: eye.y + dir.y * 0.4, z: eye.z + dir.z * 0.4 },
+      // Inherit a little of the thrower's momentum, plus a slight upward arc.
+      vel: {
+        x: dir.x * power + p.state.vel.x * 0.35,
+        y: dir.y * power + 2.2 + p.state.vel.y * 0.2,
+        z: dir.z * power + p.state.vel.z * 0.35,
+      },
+      fuse: def.fuse,
+      rest: 0,
+    };
+    this.projectiles.push(proj);
+
+    this.broadcast({
+      t: 'grenade.throw', id: proj.id, kind: def.id, by: p.id, team: p.team,
+      p: r3(proj.pos), v: r3(proj.vel), fuse: def.fuse,
+    });
+    this.send(p.client, { t: 'grenade.used', kind: def.id, cooldown: GRENADE_COOLDOWN });
+  }
+
+  stepProjectiles(dt) {
+    if (!this.projectiles.length) return;
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const g = this.projectiles[i];
+      const def = getGrenade(g.kind);
+
+      g.vel.y -= GRENADE_GRAVITY * dt;
+
+      // Sweep so a fast grenade cannot tunnel through a wall.
+      let remaining = dt;
+      let guard = 0;
+      while (remaining > 1e-4 && guard++ < 4) {
+        const step = { x: g.vel.x * remaining, y: g.vel.y * remaining, z: g.vel.z * remaining };
+        const dist = Math.hypot(step.x, step.y, step.z);
+        if (dist < 1e-5) break;
+        const dir = { x: step.x / dist, y: step.y / dist, z: step.z / dist };
+        const hit = raycastWorld(this.world, g.pos, dir, dist + 0.07, { sightOnly: true });
+
+        if (!hit) {
+          g.pos.x += step.x; g.pos.y += step.y; g.pos.z += step.z;
+          break;
+        }
+
+        // Advance to just short of the surface, then reflect.
+        const travel = Math.max(0, hit.t - 0.07);
+        g.pos.x += dir.x * travel; g.pos.y += dir.y * travel; g.pos.z += dir.z * travel;
+        const n = hit.normal;
+        const vn = g.vel.x * n.x + g.vel.y * n.y + g.vel.z * n.z;
+        g.vel.x = (g.vel.x - 2 * vn * n.x) * def.bounce;
+        g.vel.y = (g.vel.y - 2 * vn * n.y) * def.bounce;
+        g.vel.z = (g.vel.z - 2 * vn * n.z) * def.bounce;
+        // Tangential friction so grenades settle instead of skating forever.
+        g.vel.x *= def.friction; g.vel.z *= def.friction;
+
+        const speed = Math.hypot(g.vel.x, g.vel.y, g.vel.z);
+        this.pendingEvents.push({ e: 'gbounce', p: r3(g.pos), k: g.kind, s: round2(speed) });
+        if (speed < 1.2) { g.vel.x = g.vel.y = g.vel.z = 0; g.rest += remaining; }
+        remaining -= Math.max(1e-3, travel / Math.max(0.001, dist) * remaining);
+      }
+
+      g.fuse -= dt;
+      if (g.fuse <= 0) {
+        this.projectiles.splice(i, 1);
+        this.detonate(g, def);
+      }
+    }
+  }
+
+  detonate(g, def) {
+    this.broadcast({ t: 'grenade.pop', id: g.id, kind: g.kind, p: r3(g.pos), by: g.owner });
+
+    if (g.kind === 'smoke') {
+      this.smokes.push({
+        id: g.id, p: { ...g.pos }, radius: def.radius,
+        until: this.time + def.duration, born: this.time,
+      });
+      return;
+    }
+
+    const owner = this.players.get(g.owner);
+    for (const victim of this.players.values()) {
+      if (!victim.alive) continue;
+      const centre = { x: victim.state.pos.x, y: victim.state.pos.y + victim.state.height * 0.55, z: victim.state.pos.z };
+      const d = vdist(g.pos, centre);
+      if (d > def.radius) continue;
+      // Walls stop blast and light alike.
+      if (!hasLineOfSight(this.world, g.pos, centre)) continue;
+
+      if (g.kind === 'frag') {
+        const dmg = fragDamage(def, d);
+        if (dmg > 0) this.applyDamage(victim, owner || null, dmg, 'frag', 'chest', d);
+      } else if (g.kind === 'flash') {
+        const eye = eyePosition(victim.state);
+        const look = dirFromAngles(victim.state.yaw, victim.state.pitch);
+        const toward = vnorm(vsub(g.pos, eye));
+        const dot = look.x * toward.x + look.y * toward.y + look.z * toward.z;
+        const blind = flashBlind(def, vdist(g.pos, eye), dot);
+        if (blind > 0) {
+          victim.blindUntil = this.time + blind;
+          this.send(victim.client, { t: 'flashed', duration: round2(blind) });
+          if (victim.bot) victim.bot.onFlashed(blind);
+        }
+      }
+    }
+  }
+
+  /** Smoke blocks sight for bots as well as for players. */
+  smokeBlocks(a, b) {
+    for (const s of this.smokes) {
+      const grow = Math.min(1, (this.time - s.born) / 1.4);
+      const r = s.radius * grow;
+      // Distance from the smoke centre to the segment a->b.
+      const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+      const len2 = dx * dx + dy * dy + dz * dz;
+      if (len2 < 1e-6) continue;
+      let t = ((s.p.x - a.x) * dx + (s.p.y - a.y) * dy + (s.p.z - a.z) * dz) / len2;
+      t = clamp(t, 0, 1);
+      const cx = a.x + dx * t, cy = a.y + dy * t, cz = a.z + dz * t;
+      if (Math.hypot(s.p.x - cx, s.p.y - cy, s.p.z - cz) < r) return true;
+    }
+    return false;
+  }
+
+  grenadeSnapshot() {
+    if (!this.projectiles.length && !this.smokes.length) return null;
+    return {
+      g: this.projectiles.map((p) => [p.id, p.kind, round2(p.pos.x), round2(p.pos.y), round2(p.pos.z), round2(p.fuse)]),
+      s: this.smokes.map((s) => [s.id, round2(s.p.x), round2(s.p.y), round2(s.p.z), round2(s.until - this.time)]),
+    };
+  }
+
+  /** Next living teammate to spectate, falling back to anyone still up. */
+  pickSpectateTarget(p, after = null) {
+    const mates = [...this.players.values()].filter((q) => q.alive && q.team === p.team);
+    const pool = mates.length ? mates : [...this.players.values()].filter((q) => q.alive);
+    if (!pool.length) return null;
+    if (!after) return pool[0].id;
+    const i = pool.findIndex((q) => q.id === after);
+    return pool[(i + 1) % pool.length].id;
   }
 
   // -------------------------------------------------------------- respawn
   assignSpawns() {
-    for (const p of this.players.values()) {
-      const sp = this.pickSpawn(p);
-      p.state = createPlayerState(sp);
-      p.introSpawn = sp;
+    for (const team of [0, 1]) {
+      const squad = [...this.players.values()].filter((p) => p.team === team);
+      const anchors = this.spawnCluster(team, squad.length);
+      squad.forEach((p, i) => {
+        const sp = anchors[i % anchors.length];
+        p.state = createPlayerState(sp);
+        p.introSpawn = sp;
+      });
     }
   }
 
-  pickSpawn(p) {
-    const all = this.mapData.spawns;
-    const teamSpawns = this.mode.teams && p.team >= 0
-      ? all.filter((s) => s.team === p.team)
-      : all.filter((s) => s.team === -1);
-    const pool = teamSpawns.length ? teamSpawns : all;
+  /**
+   * A contiguous group of spawn points for one team, so a squad deploys
+   * together instead of being scattered across the estate.
+   */
+  spawnCluster(team, count) {
+    const pool = this.mapData.spawns.filter((s) => s.team === team);
+    if (!pool.length) return this.mapData.spawns.slice(0, Math.max(1, count));
 
-    // Prefer the spawn furthest from the nearest visible enemy.
-    let best = pool[0], bestScore = -Infinity;
-    for (const s of pool) {
-      const sp = { x: s.p[0], y: s.p[1] + 1.2, z: s.p[2] };
-      let score = Math.random() * 6;
-      for (const q of this.players.values()) {
-        if (q === p || !q.alive) continue;
-        const hostile = !this.mode.teams || q.team !== p.team;
-        const d = vdist(sp, q.state.pos);
-        if (!hostile) { score += clamp(24 - d, 0, 10) * 0.15; continue; }
-        score += Math.min(d, 60) * 0.5;
-        if (d < 18 && hasLineOfSight(this.world, sp, eyePosition(q.state))) score -= 220;
-        else if (d < 10) score -= 90;
-      }
-      if (score > bestScore) { bestScore = score; best = s; }
-    }
-    return best;
+    // Anchor on a random spawn, then take its nearest neighbours.
+    const anchor = pool[Math.floor(Math.random() * pool.length)];
+    const sorted = [...pool].sort((a, b) => {
+      const da = (a.p[0] - anchor.p[0]) ** 2 + (a.p[2] - anchor.p[2]) ** 2;
+      const db = (b.p[0] - anchor.p[0]) ** 2 + (b.p[2] - anchor.p[2]) ** 2;
+      return da - db;
+    });
+    return sorted.slice(0, Math.max(1, count));
   }
 
-  respawn(p, initial = false) {
+  /** Put a player into the world at a specific spawn and give them a full kit. */
+  respawnAt(p, spawn) {
     if (p.pendingLoadout) { p.loadout = p.pendingLoadout; p.pendingLoadout = null; }
-    const sp = this.pickSpawn(p);
-    p.state = createPlayerState(sp);
+    p.state = createPlayerState(spawn);
     p.alive = true;
+    p.spectating = false;
+    p.spectateTarget = null;
     p.health = PLAYER.maxHealth;
     p.respawnAt = 0;
-    p.spawnProtectUntil = this.time + (initial ? MATCH.warmupDuration + PLAYER.spawnProtection : PLAYER.spawnProtection);
+    // The freeze period is the protection — nobody can shoot during it anyway.
+    p.spawnProtectUntil = this.time + this.mode.freezeTime;
     p.damagedBy.clear();
     p.pendingReload = null;
     p.burstLeft = 0;
     p.lastFireTime = -99;
     p.switchEnd = 0;
+    p.streak = 0;
     this.equipLoadout(p);
     if (p.bot) p.bot.onSpawn();
     this.send(p.client, {
@@ -861,163 +1001,94 @@ export class GameRoom {
       pos: r3(p.state.pos),
       yaw: p.state.yaw,
       protectedFor: p.spawnProtectUntil - this.time,
+      round: this.roundNo,
       loadout: {
         primary: { ...p.weapons.primary.cfg, mag: p.weapons.primary.mag, reserve: p.weapons.primary.reserve },
         secondary: { ...p.weapons.secondary.cfg, mag: p.weapons.secondary.mag, reserve: p.weapons.secondary.reserve },
       },
+      grenades: p.grenades,
     });
   }
 
-  // ----------------------------------------------------------------- mode
-  initObjectives() {
-    const st = { points: [], flags: [] };
-    for (const o of getMap(this.mapId || 'oldquarter').objectives) {
-      if (o.kind === 'capture') st.points.push({ id: o.id, name: o.name, p: o.p, radius: o.radius, owner: -1, progress: 0, contested: false });
-      if (o.kind === 'flag') st.flags.push({ id: o.id, team: o.team, home: o.p, p: [...o.p], carrier: null, dropped: 0 });
-    }
-    return st;
+  // ---------------------------------------------------------------- rounds
+  aliveCount(team) {
+    let n = 0;
+    for (const p of this.players.values()) if (p.alive && p.team === team) n++;
+    return n;
   }
 
-  stepMode(dt) {
-    if (this.mode.capture) this.stepDomination(dt);
-    if (this.mode.flags) this.stepCTF(dt);
-  }
+  startRound() {
+    this.roundNo++;
+    this.lastRoundWinner = -1;
 
-  stepDomination(dt) {
-    let owned = [0, 0];
-    for (const pt of this.objectiveState.points) {
-      const centre = { x: pt.p[0], y: pt.p[1], z: pt.p[2] };
-      const counts = [0, 0];
-      for (const p of this.players.values()) {
-        if (!p.alive || p.team < 0) continue;
-        const d = Math.hypot(p.state.pos.x - centre.x, p.state.pos.z - centre.z);
-        if (d <= pt.radius && Math.abs(p.state.pos.y - centre.y) < 4.0) counts[p.team]++;
-      }
-      pt.contested = counts[0] > 0 && counts[1] > 0;
-      const lead = counts[0] > counts[1] ? 0 : counts[1] > counts[0] ? 1 : -1;
-
-      if (lead >= 0) {
-        const rate = 0.30 * Math.min(3, Math.abs(counts[0] - counts[1]));
-        if (pt.owner === lead) pt.progress = Math.min(1, pt.progress + rate * dt);
-        else {
-          pt.progress -= rate * dt;
-          if (pt.progress <= 0) { pt.owner = lead; pt.progress = 0; this.onCapture(pt, lead); }
-        }
-      }
-      if (pt.owner >= 0) owned[pt.owner]++;
+    // Everyone comes back, as a squad, at their team's spawn cluster.
+    for (const team of [0, 1]) {
+      const squad = [...this.players.values()].filter((p) => p.team === team);
+      const anchors = this.spawnCluster(team, squad.length);
+      squad.forEach((p, i) => this.respawnAt(p, anchors[i % anchors.length]));
     }
 
-    this.domAccum = (this.domAccum || 0) + dt;
-    const interval = this.mode.tickInterval || 2;
-    while (this.domAccum >= interval) {
-      this.domAccum -= interval;
-      for (const team of [0, 1]) {
-        const gain = owned[team];
-        if (gain > 0 && owned[team] > owned[1 - team]) this.scores[team] += gain;
-        else if (gain > 0) this.scores[team] += Math.max(1, gain - 1);
-      }
-      this.checkWin();
-    }
+    this.setPhase('freeze', this.mode.freezeTime);
+    this.broadcast({
+      t: 'round.start',
+      round: this.roundNo,
+      scores: this.scores,
+      freeze: this.mode.freezeTime,
+      roundTime: this.mode.roundTime,
+      alive: [this.aliveCount(0), this.aliveCount(1)],
+    });
   }
 
-  onCapture(pt, team) {
-    this.broadcast({ t: 'capture', point: pt.id, name: pt.name, team });
-    for (const p of this.players.values()) {
-      if (p.team !== team || !p.alive) continue;
-      const d = Math.hypot(p.state.pos.x - pt.p[0], p.state.pos.z - pt.p[2]);
-      if (d <= pt.radius + 2) { p.score += 5; }
-    }
+  /** Round is over the moment one side has nobody left standing. */
+  checkRoundEnd() {
+    const a = this.aliveCount(0);
+    const b = this.aliveCount(1);
+    if (a > 0 && b > 0) return;
+    // Both sides wiped in the same tick (a trade) counts for neither.
+    if (a === 0 && b === 0) return this.finishRound(-1, 'trade');
+    this.finishRound(a > 0 ? 0 : 1, 'elimination');
   }
 
-  stepCTF() {
-    for (const flag of this.objectiveState.flags) {
-      if (flag.carrier) {
-        const carrier = this.players.get(flag.carrier);
-        if (!carrier || !carrier.alive) { this.dropFlagObject(flag); continue; }
-        flag.p = [carrier.state.pos.x, carrier.state.pos.y + 1.0, carrier.state.pos.z];
-
-        // Scoring: bring the enemy flag to your own, which must be home.
-        const own = this.objectiveState.flags.find((f) => f.team === carrier.team);
-        if (own && !own.carrier && dist2(own.p, own.home) < 1.5) {
-          const d = Math.hypot(flag.p[0] - own.home[0], flag.p[2] - own.home[2]);
-          if (d < 2.6 && Math.abs(flag.p[1] - own.home[1]) < 3) {
-            this.scores[carrier.team]++;
-            carrier.score += 10;
-            flag.carrier = null;
-            carrier.hasFlag = null;   // without this the carrier stays "loaded" forever
-            flag.p = [...flag.home];
-            this.broadcast({ t: 'flagcap', team: carrier.team, by: this.brief(carrier), scores: this.scores });
-            this.checkWin();
-          }
-        }
-        continue;
-      }
-
-      for (const p of this.players.values()) {
-        if (!p.alive || p.team < 0) continue;
-        const d = Math.hypot(p.state.pos.x - flag.p[0], p.state.pos.z - flag.p[2]);
-        if (d > 1.8 || Math.abs(p.state.pos.y - flag.p[1]) > 2.4) continue;
-
-        if (p.team === flag.team) {
-          if (dist2(flag.p, flag.home) > 1.5) {
-            flag.p = [...flag.home];
-            p.score += 3;
-            this.broadcast({ t: 'flagreturn', team: flag.team, by: this.brief(p) });
-          }
-        } else if (!p.hasFlag) {
-          flag.carrier = p.id;
-          p.hasFlag = flag.id;
-          this.broadcast({ t: 'flagtake', team: flag.team, by: this.brief(p) });
-        }
-        break;
-      }
-    }
+  /** On the round clock running out, whoever has more operators alive wins. */
+  roundTimeoutWinner() {
+    const a = this.aliveCount(0);
+    const b = this.aliveCount(1);
+    if (a === b) return -1;
+    return a > b ? 0 : 1;
   }
 
-  dropFlag(p) {
-    if (!p.hasFlag) return;
-    const flag = this.objectiveState.flags.find((f) => f.id === p.hasFlag);
-    p.hasFlag = null;
-    if (flag) this.dropFlagObject(flag);
+  finishRound(winner, reason) {
+    if (this.phase === 'roundend' || this.phase === 'outro') return;
+    if (winner >= 0) this.scores[winner]++;
+    this.lastRoundWinner = winner;
+    this.roundLog.push({ round: this.roundNo, winner, reason });
+
+    // Everyone left standing is frozen for the replay beat.
+    for (const p of this.players.values()) p.pendingReload = null;
+
+    this.broadcast({
+      t: 'round.end',
+      round: this.roundNo,
+      winner,
+      reason,
+      scores: this.scores,
+      decided: this.matchDecided(),
+      intermission: this.mode.intermission,
+    });
+    this.setPhase('roundend', this.mode.intermission);
   }
 
-  dropFlagObject(flag) {
-    const carrier = flag.carrier ? this.players.get(flag.carrier) : null;
-    flag.carrier = null;
-    if (carrier) {
-      flag.p = [carrier.state.pos.x, carrier.state.pos.y + 0.4, carrier.state.pos.z];
-      carrier.hasFlag = null;
-    }
-    this.broadcast({ t: 'flagdrop', team: flag.team, p: flag.p });
+  matchDecided() {
+    return this.scores[0] >= this.mode.roundsToWin
+      || this.scores[1] >= this.mode.roundsToWin
+      || this.roundNo >= this.mode.maxRounds;
   }
 
-  checkWin() {
-    const limit = this.mode.scoreLimit;
-    if (!limit) return;
-    if (this.mode.teams) {
-      for (const team of [0, 1]) {
-        if (this.scores[team] >= limit) return this.endMatch({ kind: 'team', team });
-      }
-    } else {
-      let leader = null;
-      for (const p of this.players.values()) {
-        if (!leader || p.score > leader.score) leader = p;
-      }
-      if (leader && leader.score >= limit) return this.endMatch({ kind: 'player', player: leader });
-    }
+  matchResult() {
+    if (this.scores[0] === this.scores[1]) return { kind: 'draw' };
+    return { kind: 'team', team: this.scores[0] > this.scores[1] ? 0 : 1 };
   }
 
-  timeoutWinner() {
-    if (this.mode.teams) {
-      if (this.scores[0] === this.scores[1]) return { kind: 'draw' };
-      return { kind: 'team', team: this.scores[0] > this.scores[1] ? 0 : 1 };
-    }
-    let leader = null;
-    for (const p of this.players.values()) {
-      if (!leader || p.score > leader.score || (p.score === leader.score && p.kills > leader.kills)) leader = p;
-    }
-    return leader ? { kind: 'player', player: leader } : { kind: 'draw' };
-  }
 
   endMatch(result) {
     if (this.phase === 'outro') return;
@@ -1060,10 +1131,7 @@ export class GameRoom {
       outro: MATCH.outroDuration,
     });
 
-    for (const p of this.players.values()) {
-      p.alive = false;
-      p.hasFlag = null;
-    }
+    for (const p of this.players.values()) p.alive = false;
     this.setPhase('outro', MATCH.outroDuration);
   }
 
@@ -1110,7 +1178,6 @@ export class GameRoom {
       if (p.pendingReload) flags |= 16;
       if (s.sliding) flags |= 32;
       if (!s.onGround) flags |= 64;
-      if (p.hasFlag) flags |= 128;
       entities.push([
         p.id,
         round2(s.pos.x), round2(s.pos.y), round2(s.pos.z),
@@ -1122,11 +1189,7 @@ export class GameRoom {
       ]);
     }
 
-    const objectives = this.mode.capture
-      ? this.objectiveState.points.map((pt) => [pt.id, pt.owner, round2(pt.progress), pt.contested ? 1 : 0])
-      : this.mode.flags
-        ? this.objectiveState.flags.map((f) => [f.id, f.team, r3({ x: f.p[0], y: f.p[1], z: f.p[2] }), f.carrier])
-        : null;
+    const grenadeState = this.grenadeSnapshot();
 
     for (const p of this.players.values()) {
       if (!p.client || p.client.ws.readyState !== 1) continue;
@@ -1156,11 +1219,18 @@ export class GameRoom {
           streak: p.streak,
           zone: p.zone,
           protectedFor: Math.max(0, round2(p.spawnProtectUntil - this.time)),
+          spectating: p.spectating,
+          spectate: p.spectateTarget,
+          nades: p.grenades,
+          nadeCd: Math.max(0, round2(p.grenadeCooldown - this.time)),
+          blind: Math.max(0, round2((p.blindUntil || 0) - this.time)),
         },
         p: entities,
         ev: events,
-        o: objectives,
+        gr: grenadeState,
         sc: this.scores,
+        alive: [this.aliveCount(0), this.aliveCount(1)],
+        round: this.roundNo,
         rem: Math.max(0, round2(this.phaseEnds - this.time)),
       };
       try { p.client.ws.send(JSON.stringify(msg)); } catch { /* socket dying */ }
@@ -1189,6 +1259,11 @@ export class GameRoom {
       case 'reload': this.startReload(p); break;
       case 'switch': this.switchSlot(p, msg.slot); break;
       case 'melee': this.melee(p, p.cmd); break;
+      case 'grenade': this.throwGrenade(p, msg.kind, msg.charge); break;
+      case 'spectate': {
+        if (!p.alive) p.spectateTarget = this.pickSpectateTarget(p, p.spectateTarget);
+        break;
+      }
       case 'chat': {
         const text = String(msg.text || '').slice(0, 120).trim();
         if (!text) return;

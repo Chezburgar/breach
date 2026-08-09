@@ -14,22 +14,28 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 export const QUALITY_PRESETS = {
   low: {
-    pixelRatio: 1.0, shadows: false, shadowMap: 1024, shadowExtent: 40,
-    ao: false, bloom: false, smaa: false, grade: false, textureSize: 128, lights: 0,
+    pixelRatio: 0.8, shadows: false, shadowMap: 1024, shadowExtent: 40,
+    ao: false, bloom: false, smaa: false, grade: true, textureSize: 128, lights: 0,
+    aoSamples: 8,
   },
   medium: {
-    pixelRatio: 1.0, shadows: true, shadowMap: 1024, shadowExtent: 42,
+    pixelRatio: 1.0, shadows: true, shadowMap: 1024, shadowExtent: 40,
     ao: false, bloom: true, smaa: true, grade: true, textureSize: 192, lights: 3,
+    aoSamples: 8,
   },
   high: {
-    pixelRatio: 1.25, shadows: true, shadowMap: 2048, shadowExtent: 56,
-    ao: true, bloom: true, smaa: true, grade: true, textureSize: 256, lights: 6,
+    pixelRatio: 1.0, shadows: true, shadowMap: 2048, shadowExtent: 52,
+    ao: true, bloom: true, smaa: true, grade: true, textureSize: 256, lights: 5,
+    aoSamples: 10,
   },
   ultra: {
-    pixelRatio: 1.5, shadows: true, shadowMap: 4096, shadowExtent: 72,
+    pixelRatio: 1.35, shadows: true, shadowMap: 4096, shadowExtent: 70,
     ao: true, bloom: true, smaa: true, grade: true, textureSize: 384, lights: 8,
+    aoSamples: 18,
   },
 };
+
+export const QUALITY_ORDER = ['low', 'medium', 'high', 'ultra'];
 
 // Ceiling on the HDR buffer before bloom.
 //
@@ -276,7 +282,7 @@ export class Renderer {
       this.gtao.output = GTAOPass.OUTPUT.Default;
       this.gtao.updateGtaoMaterial({
         radius: 0.32, distanceExponent: 1.6, thickness: 1.0,
-        scale: 1.0, samples: this.quality === 'ultra' ? 24 : 16,
+        scale: 1.0, samples: this.preset.aoSamples,
         screenSpaceRadius: false,
       });
       this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, samples: 8 });
@@ -353,6 +359,32 @@ export class Renderer {
     }
     if (this.composer) this.composer.render(dt);
     else this.renderer.render(this.scene, this.camera);
+    this.trackPerformance(dt);
+  }
+
+  /**
+   * Drop a quality preset if the frame rate stays poor. Sustained low frame
+   * rate in a shooter is worse than any visual setting, so this gives ground
+   * automatically rather than waiting for the player to find the menu.
+   */
+  trackPerformance(dt) {
+    if (!this.autoQuality || dt <= 0) return;
+    this._perfWindow = (this._perfWindow || 0) + dt;
+    this._perfFrames = (this._perfFrames || 0) + 1;
+    if (this._perfWindow < 4) return;
+
+    const fps = this._perfFrames / this._perfWindow;
+    this._perfWindow = 0;
+    this._perfFrames = 0;
+    if (this._perfGrace > 0) { this._perfGrace--; return; }
+
+    const idx = QUALITY_ORDER.indexOf(this.quality);
+    if (fps < 40 && idx > 0) {
+      const next = QUALITY_ORDER[idx - 1];
+      this._perfGrace = 3;
+      this.setQuality(next);
+      this.onAutoQuality?.(next, Math.round(fps));
+    }
   }
 
   /** Off-screen render, used by the picture-in-picture scopes. */

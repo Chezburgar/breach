@@ -9,6 +9,7 @@ export const DEFAULT_BINDS = {
   reload: 'KeyR', melee: 'KeyV', use: 'KeyF', inspect: 'KeyT',
   leanLeft: 'KeyQ', leanRight: 'KeyE',
   primary: 'Digit1', secondary: 'Digit2', fireMode: 'KeyB',
+  grenade: 'KeyG', nade1: 'Digit3', nade2: 'Digit4', nade3: 'Digit5',
   scoreboard: 'Tab', chat: 'Enter', menu: 'Escape',
 };
 

@@ -139,10 +139,14 @@ function simulateMatch(modeId, seconds = 90) {
     id: `test_${modeId}`, mode: modeId, mapId: 'oldquarter', isPrivate: true, botCount: 8,
   });
 
-  const events = { kills: 0, shots: 0, captures: 0, ended: null, started: null, errors: [] };
+  const events = {
+    kills: 0, shots: 0, captures: 0, rounds: 0, grenades: 0,
+    ended: null, started: null, errors: [],
+  };
   room.broadcast = (msg) => {
     if (msg.t === 'kill') events.kills++;
-    if (msg.t === 'capture' || msg.t === 'flagcap') events.captures++;
+    if (msg.t === 'round.end') events.rounds++;
+    if (msg.t === 'grenade.pop') events.grenades++;
     if (msg.t === 'match.end') events.ended = msg;
     if (msg.t === 'match.start') events.started = msg;
   };
@@ -180,7 +184,7 @@ function simulateMatch(modeId, seconds = 90) {
   // the victory screen, the fanfare and the XP award all read from it.
   if (!events.ended && !room.disposed) {
     try {
-      room.endMatch(room.timeoutWinner());
+      room.endMatch(room.matchResult());
     } catch (err) {
       events.errors.push(err);
     }
@@ -203,6 +207,9 @@ function checkMatches() {
     ok(r.events.shots >= minShots, `${modeId}: bots engaged`, `${r.events.shots} shots`);
     ok(r.events.kills > 0, `${modeId}: eliminations registered`, `${r.events.kills} kills`);
     ok(r.embedded === 0, `${modeId}: no player stuck in geometry`, `${r.embedded} embedded`);
+
+    ok(r.events.rounds > 0, `${modeId}: rounds resolved`, `${r.events.rounds} rounds`);
+    ok(r.events.grenades > 0, `${modeId}: grenades thrown and detonated`, `${r.events.grenades} pops`);
 
     const e = r.events.ended;
     const boardOk = e && Array.isArray(e.board) && e.board.length === 8 &&

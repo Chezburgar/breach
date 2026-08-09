@@ -19,11 +19,16 @@ export const BOT_NAMES = [
   'Duval', 'Petrov', 'Achebe', 'Quill',
 ];
 
+// Bot skill. `error` is the aim wobble in degrees, `drift` a slow random walk
+// that keeps them from converging on a perfect solution, and `settle` how long
+// their aim keeps improving after acquiring a target — without it a bot snaps
+// to a pixel-perfect solution the instant it sees you, which is what makes
+// fighting them feel unfair rather than hard.
 const DIFFICULTIES = [
-  { name: 'Recruit', turn: 3.2, error: 3.4, reaction: 0.42, burst: [3, 6], range: 42, accuracy: 0.55 },
-  { name: 'Regular', turn: 5.0, error: 2.1, reaction: 0.30, burst: [4, 8], range: 55, accuracy: 0.72 },
-  { name: 'Veteran', turn: 7.2, error: 1.25, reaction: 0.21, burst: [5, 11], range: 70, accuracy: 0.86 },
-  { name: 'Elite',   turn: 9.4, error: 0.75, reaction: 0.15, burst: [6, 14], range: 90, accuracy: 0.94 },
+  { name: 'Recruit', turn: 1.8, error: 7.0, drift: 3.4, reaction: 0.68, burst: [2, 4], range: 34, accuracy: 0.30, settle: 1.6 },
+  { name: 'Regular', turn: 2.6, error: 5.2, drift: 2.6, reaction: 0.52, burst: [3, 6], range: 44, accuracy: 0.42, settle: 1.3 },
+  { name: 'Veteran', turn: 3.6, error: 3.6, drift: 1.8, reaction: 0.40, burst: [3, 7], range: 56, accuracy: 0.55, settle: 1.0 },
+  { name: 'Elite',   turn: 4.8, error: 2.4, drift: 1.2, reaction: 0.30, burst: [4, 8], range: 68, accuracy: 0.68, settle: 0.8 },
 ];
 
 export class Bot {
@@ -57,6 +62,8 @@ export class Bot {
   reset() {
     this.target = null;
     this.targetSeenAt = -99;
+    this.targetAcquiredAt = -99;
+    this.driftT = Math.random() * 10;
     this.lastKnown = null;
     this.reactTimer = 0;
     this.path = null;
@@ -71,6 +78,21 @@ export class Bot {
     this.scanYaw = Math.random() * Math.PI * 2;
     this.stuckTimer = 0;
     this.lastPos = null;
+  }
+
+  /** Sight is blocked by walls and by smoke alike. */
+  canSee(from, to) {
+    if (!hasLineOfSight(this.room.world, from, to)) return false;
+    if (this.room.smokeBlocks && this.room.smokeBlocks(from, to)) return false;
+    return true;
+  }
+
+  onFlashed(duration) {
+    this.blindUntil = this.room.time + duration;
+  }
+
+  get blinded() {
+    return this.room.time < (this.blindUntil || 0);
   }
 
   onSpawn() {
@@ -105,9 +127,22 @@ export class Bot {
       const aimPoint = this.aimPointFor(this.target);
       const d = vnorm(vsub(aimPoint, eye));
       const a = anglesFromDir(d);
-      const wobble = this.skill.error * (Math.PI / 180);
-      desiredYaw = a.yaw + Math.sin(room.time * 3.1 + this.seedOffset()) * wobble;
-      desiredPitch = a.pitch + Math.cos(room.time * 2.3 + this.seedOffset()) * wobble * 0.6;
+
+      // Aim converges over `settle` seconds rather than being instantly
+      // correct, and never fully converges — there is always residual wobble
+      // plus a slow drift the bot has to chase.
+      const held = Math.max(0, room.time - this.targetAcquiredAt);
+      const converge = Math.min(1, held / this.skill.settle);
+      const wobble = this.skill.error * (1 - converge * 0.55) * (Math.PI / 180);
+
+      this.driftT = (this.driftT || 0) + dt;
+      const drift = this.skill.drift * (Math.PI / 180);
+      const dy = Math.sin(this.driftT * 0.7 + this.seedOffset()) * drift
+               + Math.sin(this.driftT * 2.9 + this.seedOffset() * 2) * drift * 0.4;
+      const dp = Math.cos(this.driftT * 0.9 + this.seedOffset()) * drift * 0.7;
+
+      desiredYaw = a.yaw + dy + Math.sin(room.time * 3.1 + this.seedOffset()) * wobble;
+      desiredPitch = a.pitch + dp + Math.cos(room.time * 2.3 + this.seedOffset()) * wobble * 0.6;
     } else if (this.lastKnown) {
       const d = vnorm(vsub(this.lastKnown, eye));
       const a = anglesFromDir(d);
@@ -170,6 +205,12 @@ export class Bot {
         // hip-firing while strafing, bots simply never hit anything.
         if (dist > 9) btn |= BTN.ADS;
         if (Math.random() < 0.004) btn |= BTN.CROUCH;
+
+        // Occasionally use a throwable at a sensible range.
+        if (room.time >= p.grenadeCooldown && dist > 8 && dist < 28 && Math.random() < 0.006) {
+          const have = ['frag', 'flash', 'smoke'].filter((k) => p.grenades[k]);
+          if (have.length) room.throwGrenade(p, have[Math.floor(Math.random() * have.length)], 1);
+        }
       }
 
       // Unstick. Pressed against a wall, the useful move is to slide along it;
@@ -261,8 +302,9 @@ export class Bot {
 
   aimPointFor(target) {
     const h = target.state.height;
-    // Aim centre mass, drifting up toward the head as skill rises.
-    const y = target.state.pos.y + h * (0.62 + 0.28 * this.skill.accuracy);
+    // Centre mass, only creeping upward a little at high skill. Bots that aim
+    // at the head land constant one-shot kills and read as aimbots.
+    const y = target.state.pos.y + h * (0.52 + 0.14 * this.skill.accuracy);
     return { x: target.state.pos.x, y, z: target.state.pos.z };
   }
 
@@ -270,9 +312,10 @@ export class Bot {
     const p = this.player;
     const t = this.target;
     if (!t || !t.alive) return false;
+    if (this.blinded) return false;
     const eye = eyePosition(p.state);
     const aim = this.aimPointFor(t);
-    if (!hasLineOfSight(this.room.world, eye, aim)) return false;
+    if (!this.canSee(eye, aim)) return false;
     const d = vnorm(vsub(aim, eye));
     const a = anglesFromDir(d);
     const off = Math.abs(angleDelta(this.aimYaw, a.yaw)) + Math.abs(this.aimPitch - a.pitch);
@@ -289,6 +332,8 @@ export class Bot {
     this.scanYaw += dt * 0.5;
 
     if (!live) { this.target = null; return; }
+    // Flashed bots lose track of everything, same as a player would.
+    if (this.blinded) { this.target = null; this.lastKnown = null; return; }
 
     const eye = eyePosition(p.state);
     let best = null, bestScore = -Infinity;
@@ -299,7 +344,7 @@ export class Bot {
       if (room.time < q.spawnProtectUntil) continue;
       const d = vdist(p.state.pos, q.state.pos);
       if (d > this.skill.range) continue;
-      if (!hasLineOfSight(room.world, eye, eyePosition(q.state))) continue;
+      if (!this.canSee(eye, eyePosition(q.state))) continue;
 
       // Prefer close, and prefer whoever is already in front of us.
       const toward = Math.abs(angleDelta(this.aimYaw, Math.atan2(-(q.state.pos.x - p.state.pos.x), -(q.state.pos.z - p.state.pos.z))));
@@ -308,7 +353,10 @@ export class Bot {
     }
 
     if (best) {
-      if (best !== this.target) this.reactTimer = this.skill.reaction;
+      if (best !== this.target) {
+        this.reactTimer = this.skill.reaction;
+        this.targetAcquiredAt = room.time + this.skill.reaction;
+      }
       this.target = best;
       this.targetSeenAt = room.time;
       this.lastKnown = { ...best.state.pos, y: best.state.pos.y + 1.2 };

@@ -497,6 +497,66 @@ export class Effects {
     if (material !== 'water') this.bulletHole(point, normal, material === 'glass' ? 0.14 : 0.1);
   }
 
+  /** Frag detonation: fireball, smoke, debris and a bright flash of light. */
+  blast(point, radius) {
+    for (let i = 0; i < 34; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const e = Math.random() * Math.PI * 0.5;
+      const sp = 6 + Math.random() * 14;
+      this.spawnParticle({
+        x: point.x, y: point.y + 0.1, z: point.z,
+        vx: Math.cos(a) * Math.cos(e) * sp,
+        vy: Math.sin(e) * sp * 0.9,
+        vz: Math.sin(a) * Math.cos(e) * sp,
+        life: 0.3 + Math.random() * 0.45,
+        r: 1.0, g: 0.62 + Math.random() * 0.3, b: 0.22,
+        size: 0.09 + Math.random() * 0.09,
+        gravity: 0.8, drag: 0.9,
+      });
+    }
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.spawnParticle({
+        x: point.x, y: point.y + 0.2, z: point.z,
+        vx: Math.cos(a) * (1 + Math.random() * 3),
+        vy: 1 + Math.random() * 2.5,
+        vz: Math.sin(a) * (1 + Math.random() * 3),
+        life: 0.8 + Math.random() * 0.7,
+        r: 0.3, g: 0.29, b: 0.28,
+        size: 0.4, gravity: -0.05, drag: 0.88,
+      });
+    }
+    this.muzzleLight.position.set(point.x, point.y + 0.6, point.z);
+    this.muzzleLight.color.setHex(0xffa040);
+    this.muzzleLight.intensity = 120;
+    this.worldFlashTimer = 0.28;
+    this.worldFlash.visible = false;
+    void radius;
+  }
+
+  /** Flashbang burst — the screen white-out itself is handled by the HUD. */
+  flashPop(point) {
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const e = (Math.random() - 0.5) * Math.PI;
+      const sp = 8 + Math.random() * 12;
+      this.spawnParticle({
+        x: point.x, y: point.y, z: point.z,
+        vx: Math.cos(a) * Math.cos(e) * sp,
+        vy: Math.sin(e) * sp,
+        vz: Math.sin(a) * Math.cos(e) * sp,
+        life: 0.18 + Math.random() * 0.2,
+        r: 1, g: 1, b: 1,
+        size: 0.07, gravity: 0.2, drag: 0.86,
+      });
+    }
+    this.muzzleLight.position.set(point.x, point.y + 0.4, point.z);
+    this.muzzleLight.color.setHex(0xffffff);
+    this.muzzleLight.intensity = 200;
+    this.worldFlashTimer = 0.2;
+    this.worldFlash.visible = false;
+  }
+
   blood(point, dir) {
     for (let i = 0; i < 10; i++) {
       this.spawnParticle({

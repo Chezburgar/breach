@@ -8,6 +8,14 @@ import { drawCrosshair, drawOpticReticle, drawScopeOverlay } from './reticles.js
 
 const $ = (id) => document.getElementById(id);
 
+const GRENADE_ORDER = ['frag', 'flash', 'smoke'];
+const GRENADE_LABEL = { frag: 'FRAG', flash: 'FLASH', smoke: 'SMOKE' };
+const GRENADE_GLYPH = {
+  frag: '<svg viewBox="0 0 24 24"><path d="M12 4a1.6 1.6 0 0 1 1.6 1.6V7h1.6l1.2-1.2 1.4 1.4-1.2 1.2v1.2A6 6 0 1 1 9 7.2V5.6A1.6 1.6 0 0 1 10.4 4z"/></svg>',
+  flash: '<svg viewBox="0 0 24 24"><path d="M11 3h4l-2.2 6H17l-8 12 2-8H7z"/></svg>',
+  smoke: '<svg viewBox="0 0 24 24"><path d="M6 16a4 4 0 0 1 .6-7.9A5 5 0 0 1 16 7a4 4 0 0 1 2 9z"/><rect x="8" y="17" width="9" height="2" rx="1"/></svg>',
+};
+
 export class HUD {
   constructor() {
     this.root = $('hud');
@@ -98,6 +106,61 @@ export class HUD {
 
     // Damage feedback decay.
     this.damageVignette.style.opacity = String(Math.max(0, s.hurt));
+
+    this.renderFlash(s.blind);
+    this.renderGrenades(s);
+    this.renderSpectate(s);
+  }
+
+  /** Flashbang white-out: instant, then fading back over the blind duration. */
+  renderFlash(blind) {
+    const el = $('flash-blind');
+    if (!blind || blind <= 0) {
+      if (this.flashPeak) { this.flashPeak = 0; el.style.opacity = '0'; }
+      return;
+    }
+    this.flashPeak = Math.max(this.flashPeak || 0, blind);
+    // Hold near-full white for the first third, then ease off.
+    const t = blind / this.flashPeak;
+    const a = t > 0.66 ? 0.97 : Math.pow(t / 0.66, 0.8) * 0.97;
+    el.style.opacity = String(a);
+  }
+
+  renderGrenades(s) {
+    const bar = $('grenade-bar');
+    if (!s.grenadeStock) return;
+    const cd = s.grenadeCooldown || 0;
+    const key = `${s.grenadeKind}|${GRENADE_ORDER.map((k) => s.grenadeStock[k]).join('')}|${Math.ceil(cd)}`;
+    if (bar.dataset.key !== key) {
+      bar.dataset.key = key;
+      bar.innerHTML = GRENADE_ORDER.map((k, i) => {
+        const have = s.grenadeStock[k];
+        const active = k === s.grenadeKind;
+        const pct = cd > 0 ? (cd / (s.grenadeCooldownMax || 15)) * 100 : 0;
+        return `<div class="gnd ${active ? 'active' : ''} ${have ? '' : 'spent'}">
+            ${GRENADE_GLYPH[k]}
+            <span>${GRENADE_LABEL[k]}</span>
+            <b>${i + 3}</b>
+            <i style="height:${pct}%"></i>
+          </div>`;
+      }).join('');
+    }
+  }
+
+  renderSpectate(s) {
+    const bar = $('spectate-bar');
+    const on = !!s.spectating && !!s.spectateName;
+    bar.classList.toggle('hidden', !on);
+    if (on) $('spectate-name').textContent = s.spectateName;
+  }
+
+  /** Big centred round announcement. */
+  roundBanner(title, sub, ms = 2500) {
+    const el = $('round-banner');
+    el.innerHTML = `<div class="rb-title">${title}</div><div class="rb-sub">${sub}</div>`;
+    el.classList.add('show');
+    clearTimeout(this.roundTimer);
+    this.roundTimer = setTimeout(() => el.classList.remove('show'), ms);
   }
 
   spreadToPixels(spreadDeg, fovDeg) {
@@ -109,15 +172,24 @@ export class HUD {
 
   renderScores(s) {
     const strip = $('score-strip');
-    const key = s.teams ? `t${s.scores[0]}:${s.scores[1]}` : `s${s.myScore}:${s.topScore}`;
+    const alive = s.aliveCounts || [0, 0];
+    const key = `t${s.scores[0]}:${s.scores[1]}|${alive[0]}:${alive[1]}|r${s.round}`;
     if (strip.dataset.key === key) return;
     strip.dataset.key = key;
-    if (s.teams) {
-      strip.innerHTML = `<div class="side a">${s.scores[0]}</div><div class="side b">${s.scores[1]}</div>`;
-    } else {
-      strip.innerHTML = `<div class="side solo">${s.myScore}</div><div class="side solo">${s.topScore}</div>`;
-    }
-    $('mode-tag').textContent = s.modeName || '';
+
+    // Round wins, with the number of operators still standing under each.
+    const pips = (team) => {
+      const need = s.roundsToWin || 3;
+      let out = '<div class="round-pips">';
+      for (let i = 0; i < need; i++) {
+        out += `<i class="${i < s.scores[team] ? (team === 0 ? 'a' : 'b') : ''}"></i>`;
+      }
+      return `${out}</div>`;
+    };
+    strip.innerHTML =
+      `<div class="side a">${s.scores[0]}${pips(0)}</div>` +
+      `<div class="side b">${s.scores[1]}${pips(1)}</div>`;
+    $('mode-tag').textContent = `ROUND ${s.round || 1} · ${alive[0]}v${alive[1]} ALIVE`;
   }
 
   renderObjectives(s) {

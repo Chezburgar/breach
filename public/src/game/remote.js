@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { INTERP_DELAY, PLAYER, TEAM_INFO } from '/shared/constants.js';
 import { lerp, lerpAngle, clamp } from '/shared/mathx.js';
+import { Operator, loadOperatorTemplate } from './character.js';
 
 const SHARED = {};
 function geom(key, make) {
@@ -51,7 +52,7 @@ function nameplate(name, color) {
 }
 
 export class RemotePlayer {
-  constructor(scene, info, isEnemy) {
+  constructor(scene, info, isEnemy, template = null) {
     this.scene = scene;
     this.id = info.id;
     this.info = info;
@@ -59,6 +60,8 @@ export class RemotePlayer {
     this.buffer = [];
     this.visible = true;
     this.dead = false;
+    this.deadTime = 0;
+    this.template = template;
 
     const teamColor = info.team >= 0
       ? TEAM_INFO[info.team].colorHex
@@ -69,7 +72,25 @@ export class RemotePlayer {
     this.root = new THREE.Group();
     this.root.name = `player:${info.id}`;
 
-    // Hips carry the whole body so leaning and crouching are one transform.
+    // Preferred path: the rigged operator model, posed procedurally.
+    if (template) {
+      this.operator = new Operator(template, { team: info.team, enemy: isEnemy });
+      this.root.add(this.operator.root);
+      this.plate = nameplate(info.name, info.team >= 0 ? TEAM_INFO[info.team].color : '#e8ecf3');
+      this.plate.position.set(0, 2.06, 0);
+      this.root.add(this.plate);
+      this.plate.visible = false;
+      scene.add(this.root);
+      this.walkPhase = 0;
+      this.renderPos = new THREE.Vector3();
+      this.smoothYaw = 0;
+      this.aimPitch = 0;
+      this.height = PLAYER.standHeight;
+      this.flags = 0;
+      return;
+    }
+
+    // Fallback: articulated boxes, used if the model fails to load.
     this.hips = new THREE.Group();
     this.root.add(this.hips);
 
@@ -182,8 +203,13 @@ export class RemotePlayer {
     if (!s) { this.root.visible = false; return; }
 
     const alive = (s.flags & 1) !== 0;
+    if (alive) this.deadTime = 0;
+    else this.deadTime += dt;
     this.dead = !alive;
-    this.root.visible = alive && this.visible;
+
+    // Bodies linger briefly so a kill reads, then are cleared.
+    const showCorpse = !alive && this.deadTime < 6 && this.operator;
+    this.root.visible = (alive || showCorpse) && this.visible;
     if (!this.root.visible) return;
 
     const prevX = this.renderPos.x, prevZ = this.renderPos.z;
@@ -194,6 +220,35 @@ export class RemotePlayer {
     this.smoothYaw = lerpAngle(this.smoothYaw, s.yaw, 1 - Math.exp(-16 * dt));
     this.root.rotation.y = this.smoothYaw;
     this.aimPitch = lerp(this.aimPitch, s.pitch, 1 - Math.exp(-18 * dt));
+
+    if (this.operator) {
+      const dx = this.renderPos.x - prevX, dz = this.renderPos.z - prevZ;
+      const speed = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
+      const crouchAmount = clamp(
+        (PLAYER.standHeight - s.h) / (PLAYER.standHeight - PLAYER.crouchHeight), 0, 1
+      );
+      this.operator.update(dt, {
+        speed,
+        onGround: (s.flags & 64) === 0,
+        crouch: crouchAmount > 0.4,
+        ads: (s.flags & 8) !== 0,
+        pitch: this.aimPitch,
+        lean: s.lean || 0,
+        dead: !alive,
+        deadTime: this.deadTime,
+      });
+      if (this.plate.visible) {
+        this.plate.position.y = 2.06 - crouchAmount * 0.5;
+        const d = camera ? camera.position.distanceTo(this.renderPos) : 10;
+        const scale = clamp(d * 0.055, 0.9, 3.2);
+        this.plate.scale.set(1.5 * scale, 0.375 * scale, 1);
+      }
+      this.plate.visible = this.plate.visible && alive;
+      this.height = s.h;
+      this.flags = s.flags;
+      this.weaponId = s.weapon;
+      return;
+    }
 
     // Stance: crouch by squashing the hips rather than swapping models.
     const crouchAmount = clamp((PLAYER.standHeight - s.h) / (PLAYER.standHeight - PLAYER.crouchHeight), 0, 1);
@@ -250,7 +305,8 @@ export class RemotePlayer {
     this.scene.remove(this.root);
     this.plate.material.map?.dispose();
     this.plate.material.dispose();
-    for (const m of Object.values(this.M)) m.dispose();
+    this.operator?.dispose();
+    if (this.M) for (const m of Object.values(this.M)) m.dispose();
   }
 }
 
@@ -258,12 +314,18 @@ export class RemoteManager {
   constructor(scene) {
     this.scene = scene;
     this.players = new Map();
+    this.template = null;
+    // Load the operator model up front; players created before it arrives use
+    // the box fallback and are upgraded on their next appearance.
+    loadOperatorTemplate()
+      .then((t) => { this.template = t; })
+      .catch((err) => console.warn('operator model unavailable, using fallback', err));
   }
 
   ensure(info, isEnemy) {
     let p = this.players.get(info.id);
     if (!p) {
-      p = new RemotePlayer(this.scene, info, isEnemy);
+      p = new RemotePlayer(this.scene, info, isEnemy, this.template);
       this.players.set(info.id, p);
     }
     return p;

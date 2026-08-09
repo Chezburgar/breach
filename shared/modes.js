@@ -1,93 +1,36 @@
-// Game mode definitions — deadshot.io's playlist, sized for 10 players.
+// The one game mode.
+//
+// Five versus five, one life per round, best of five. Dying puts you into
+// spectator until the round resolves, which is what makes every engagement
+// matter and gives the map's angles their weight.
 
 export const MODES = {
-  ffa: {
-    id: 'ffa',
-    name: 'Free For All',
-    short: 'FFA',
-    blurb: 'Everyone for themselves. First to 30 eliminations takes it.',
-    teams: false,
-    scoreLimit: 30,
-    timeLimit: 600,
-    minPlayers: 2,
-    maxPlayers: 10,
-    respawn: true,
-    icon: 'ffa',
-  },
-  tdm: {
-    id: 'tdm',
-    name: 'Team Deathmatch',
-    short: 'TDM',
-    blurb: 'Five on five. First squad to 60 eliminations wins the round.',
+  breach: {
+    id: 'breach',
+    name: 'Breach',
+    short: 'BR',
+    blurb: 'Five on five, one life a round. First squad to three rounds takes the match.',
     teams: true,
-    scoreLimit: 60,
-    timeLimit: 600,
+    respawn: false,
+
+    roundsToWin: 3,        // best of five
+    maxRounds: 5,
+    roundTime: 145,        // seconds of live play per round
+    freezeTime: 6,         // buy/settle time at round start, movement locked
+    intermission: 7,       // between rounds
+    switchSidesAfter: 0,   // no side swap; spawns are symmetric enough
+
     minPlayers: 2,
     maxPlayers: 10,
-    respawn: true,
-    icon: 'tdm',
-  },
-  dom: {
-    id: 'dom',
-    name: 'Domination',
-    short: 'DOM',
-    blurb: 'Hold A, B and C. Points tick while you own more ground than they do.',
-    teams: true,
-    scoreLimit: 200,
-    timeLimit: 720,
-    minPlayers: 2,
-    maxPlayers: 10,
-    respawn: true,
-    capture: true,
-    tickInterval: 2.0,
-    icon: 'dom',
-  },
-  ctf: {
-    id: 'ctf',
-    name: 'Capture the Flag',
-    short: 'CTF',
-    blurb: 'Take theirs, hold yours. Three captures ends it.',
-    teams: true,
-    scoreLimit: 3,
-    timeLimit: 720,
-    minPlayers: 2,
-    maxPlayers: 10,
-    respawn: true,
-    flags: true,
-    icon: 'ctf',
-  },
-  gg: {
-    id: 'gg',
-    name: 'Gun Game',
-    short: 'GG',
-    blurb: 'Every elimination promotes you. Finish the ladder to win.',
-    teams: false,
-    timeLimit: 900,
-    minPlayers: 2,
-    maxPlayers: 10,
-    respawn: true,
-    ladder: true,
-    icon: 'gg',
-  },
-  oitc: {
-    id: 'oitc',
-    name: 'One in the Chamber',
-    short: 'OITC',
-    blurb: 'One round, one kill. Land it and you get another. Miss and you go melee.',
-    teams: false,
-    scoreLimit: 20,
-    timeLimit: 600,
-    minPlayers: 2,
-    maxPlayers: 10,
-    respawn: true,
-    oneShot: true,
-    icon: 'oitc',
+    teamSize: 5,
+    icon: 'breach',
   },
 };
 
 export const MODE_IDS = Object.keys(MODES);
-export const QUICKPLAY_MODES = ['ffa', 'tdm', 'dom', 'gg'];
+export const QUICKPLAY_MODES = ['breach'];
+export const DEFAULT_MODE = 'breach';
 
 export function getMode(id) {
-  return MODES[id] || MODES.ffa;
+  return MODES[id] || MODES.breach;
 }

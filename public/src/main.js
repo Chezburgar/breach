@@ -71,6 +71,7 @@ async function main() {
         menu.toast(`Graphics set to ${q.toUpperCase()} — reload to repaint materials.`);
       }
     },
+    onAutoQuality: (on) => { game.renderer.autoQuality = on; },
     onProfileChange: () => {
       net.send({
         t: 'profile',
@@ -86,6 +87,12 @@ async function main() {
     },
   });
   game.menu = menu;
+  game.renderer.autoQuality = profile.settings.autoQuality !== false;
+  game.renderer.onAutoQuality = (level, fps) => {
+    profile.settings.quality = level;
+    saveProfile(profile);
+    menu.toast(`Graphics lowered to ${level.toUpperCase()} (${fps} fps)`);
+  };
 
   await progress(0.9, 'connecting');
 

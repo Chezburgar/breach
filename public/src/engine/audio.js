@@ -200,6 +200,8 @@ export class AudioEngine {
     this.route(oe, { spatial: sp, gain: 0.5 });
     osc.start(t); osc.stop(t + 0.2);
 
+    this.action(t, sp, level);
+
     // Tail: a short slap-back so shots sit in the space.
     if (!suppressed && (!sp || sp.gain > 0.2)) {
       const tail = this.ctx.createBufferSource();
@@ -215,6 +217,154 @@ export class AudioEngine {
       this.route(te, { spatial: sp, gain: 0.4 });
       tail.start(t + 0.03); tail.stop(t + 0.7);
     }
+  }
+
+  /**
+   * Mechanical action noise layered over a shot — the bolt cycling is a large
+   * part of why a real gun sounds like machinery rather than a firework.
+   */
+  action(t, sp, level) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.playbackRate.value = 3.0;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 3400;
+    bp.Q.value = 3;
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t + 0.012);
+    env.gain.exponentialRampToValueAtTime(0.22 * level, t + 0.022);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.075);
+    src.connect(bp); bp.connect(env);
+    this.route(env, { spatial: sp, gain: 0.5 });
+    src.start(t + 0.012); src.stop(t + 0.1);
+  }
+
+  explosion(pos) {
+    if (!this.ready) return;
+    const sp = pos ? this.spatial(pos, 18, 260) : null;
+    if (pos && !sp) return;
+    const t = this.ctx.currentTime + (sp?.delay ?? 0);
+
+    // Sub-bass thump.
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(110, t);
+    o.frequency.exponentialRampToValueAtTime(26, t + 0.55);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(1.0, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+    o.connect(og);
+    this.route(og, { spatial: sp, gain: 0.9 });
+    o.start(t); o.stop(t + 0.9);
+
+    // Sharp crack.
+    const c = this.ctx.createBufferSource();
+    c.buffer = this.noise;
+    c.playbackRate.value = 1.6;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 1200;
+    const cg = this.ctx.createGain();
+    cg.gain.setValueAtTime(0.9, t);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    c.connect(hp); hp.connect(cg);
+    this.route(cg, { spatial: sp, gain: 0.8 });
+    c.start(t); c.stop(t + 0.25);
+
+    // Long rumbling tail.
+    const tail = this.ctx.createBufferSource();
+    tail.buffer = this.noise;
+    tail.playbackRate.value = 0.35;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(1800, t);
+    lp.frequency.exponentialRampToValueAtTime(220, t + 1.4);
+    const tg = this.ctx.createGain();
+    tg.gain.setValueAtTime(0.55, t + 0.02);
+    tg.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+    tail.connect(lp); lp.connect(tg);
+    this.route(tg, { spatial: sp, gain: 0.8 });
+    tail.start(t); tail.stop(t + 1.8);
+  }
+
+  flashbang(pos) {
+    if (!this.ready) return;
+    const sp = pos ? this.spatial(pos, 16, 200) : null;
+    if (pos && !sp) return;
+    const t = this.ctx.currentTime + (sp?.delay ?? 0);
+
+    const c = this.ctx.createBufferSource();
+    c.buffer = this.noise;
+    c.playbackRate.value = 2.2;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 2200;
+    const cg = this.ctx.createGain();
+    cg.gain.setValueAtTime(1.0, t);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    c.connect(hp); hp.connect(cg);
+    this.route(cg, { spatial: sp, gain: 0.9 });
+    c.start(t); c.stop(t + 0.35);
+  }
+
+  /** The ringing left behind after a flash goes off in your face. */
+  tinnitus(duration) {
+    if (!this.ready || this.ringing) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = 4300;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.10, t + 0.06);
+    g.gain.setValueAtTime(0.10, t + Math.max(0.2, duration * 0.5));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + duration + 1.4);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + duration + 1.6);
+    this.ringing = true;
+    setTimeout(() => { this.ringing = false; }, (duration + 1.6) * 1000);
+
+    // Duck everything else while the ears are ringing.
+    const s = this.sfx.gain;
+    s.cancelScheduledValues(t);
+    s.setValueAtTime(s.value, t);
+    s.linearRampToValueAtTime(this.volumes.sfx * 0.25, t + 0.05);
+    s.linearRampToValueAtTime(this.volumes.sfx, t + duration + 0.8);
+  }
+
+  smokePop(pos) {
+    if (!this.ready) return;
+    const sp = this.spatial(pos, 10, 120);
+    if (!sp) return;
+    const t = this.ctx.currentTime + sp.delay;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.playbackRate.value = 0.8;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.7;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.14, t + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+    src.connect(bp); bp.connect(g);
+    this.route(g, { spatial: sp, gain: 0.6 });
+    src.start(t); src.stop(t + 2.6);
+  }
+
+  /** Grenade bouncing off a hard surface. */
+  bounce(pos, speed) {
+    if (!this.ready) return;
+    const sp = this.spatial(pos, 6, 60);
+    if (!sp || speed < 1.5) return;
+    const t = this.ctx.currentTime + sp.delay;
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(420 + Math.random() * 220, t);
+    const g = this.ctx.createGain();
+    const amp = Math.min(0.25, speed * 0.02);
+    g.gain.setValueAtTime(amp, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    o.connect(g);
+    this.route(g, { spatial: sp, gain: 0.7 });
+    o.start(t); o.stop(t + 0.14);
   }
 
   impact(material, pos) {

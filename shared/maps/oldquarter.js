@@ -99,10 +99,11 @@ export function buildOldQuarter() {
     tagline: 'Coastal compound · 09:40 local',
     bounds: { min: [-78, -10, -78], max: [78, 36, 78] },
     ambience: 'day',
-    sun: { azimuth: 128, elevation: 34, intensity: 4.2, color: 0xffeed6 },
-    sky: { turbidity: 3.4, rayleigh: 1.35, mieCoefficient: 0.007, mieDirectionalG: 0.83 },
-    fog: { color: 0x8ea3b6, density: 0.0011 },
-    envIntensity: 0.15,
+    sun: { azimuth: 128, elevation: 34, intensity: 3.1, color: 0xffe9cf },
+    sky: { turbidity: 4.2, rayleigh: 1.1, mieCoefficient: 0.006, mieDirectionalG: 0.80 },
+    fog: { color: 0x7d8fa0, density: 0.0026 },
+    envIntensity: 0.11,
+    exposure: 0.34,
   });
 
   ground(b);

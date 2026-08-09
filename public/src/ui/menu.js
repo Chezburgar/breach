@@ -26,7 +26,8 @@ export function loadProfile() {
       adsSensitivity: 0.8,
       invertY: false,
       fov: 90,
-      quality: 'high',
+      quality: 'medium',
+      autoQuality: true,
       masterVolume: 0.8,
       sfxVolume: 1.0,
       musicVolume: 0.7,
@@ -403,6 +404,7 @@ export class Menu {
       Object.keys(QUALITY_PRESETS).map((q) => ({ value: q, label: q.toUpperCase() })),
       (v) => this.onQuality?.(v),
       'Ultra enables 4K shadows, higher-resolution materials and denser ambient occlusion.');
+    toggle('AUTO-ADJUST QUALITY', 'autoQuality', (v) => { this.onAutoQuality?.(v); });
     slider('MASTER VOLUME', 'masterVolume', 0, 1, 0.01, (v) => `${Math.round(v * 100)}`,
       (v) => this.audio?.setVolume('master', v));
     slider('EFFECTS VOLUME', 'sfxVolume', 0, 1, 0.01, (v) => `${Math.round(v * 100)}`,

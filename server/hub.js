@@ -10,8 +10,11 @@ import { GameRoom } from './room.js';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MATCH_TARGET = 10;
-const SOLO_FILL_WAIT = 6.0;   // seconds before a lone queuer gets a bot match
-const QUICK_START = 4;        // this many real players starts immediately
+// How long to keep looking for real opponents before topping the match up with
+// bots. Long enough that a populated playlist actually finds humans.
+const SOLO_FILL_WAIT = 35.0;
+const QUICK_START = 10;       // this many real players starts immediately
+const PARTIAL_WAIT = 18.0;    // with a few humans, wait this long then fill
 
 function makeCode(taken) {
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -350,7 +353,12 @@ export class Hub {
       const total = q.reduce((n, e) => n + e.size, 0);
       const oldestWait = (now - Math.min(...q.map((e) => e.since))) / 1000;
 
-      const ready = total >= QUICK_START || (oldestWait >= SOLO_FILL_WAIT && total >= 1);
+      // Fill with bots only after a real search: immediately at a full lobby,
+      // after a shorter wait once a few humans have gathered, and only after a
+      // long wait for someone queueing alone.
+      const ready = total >= QUICK_START
+        || (total >= 4 && oldestWait >= PARTIAL_WAIT)
+        || (total >= 1 && oldestWait >= SOLO_FILL_WAIT);
       if (!ready) {
         // Keep the client's search UI honest while it waits.
         for (const e of q) {
