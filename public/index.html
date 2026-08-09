@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d12" />
+  <title>BREACH</title>
+  <meta name="description" content="BREACH — a fast tactical arena shooter for the browser." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230b0d12'/><path d='M16 5v22M5 16h22' stroke='%23ff6a3d' stroke-width='2.5'/><circle cx='16' cy='16' r='7' fill='none' stroke='%23ff6a3d' stroke-width='2.5'/></svg>" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three/three.module.js",
+        "three/addons/": "/vendor/three/addons/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <!-- ================= Loading ================= -->
+  <div id="boot" class="overlay boot">
+    <div class="boot-inner">
+      <div class="wordmark"><span>B</span>REACH</div>
+      <div class="boot-bar"><i id="boot-fill"></i></div>
+      <div id="boot-status" class="boot-status">initialising</div>
+    </div>
+  </div>
+
+  <!-- ================= HUD ================= -->
+  <div id="hud" class="hud hidden">
+    <canvas id="reticle" class="reticle" width="256" height="256"></canvas>
+    <div id="hitmarker" class="hitmarker"></div>
+    <div id="scope-overlay" class="scope-overlay hidden">
+      <canvas id="scope-canvas"></canvas>
+    </div>
+
+    <div class="hud-top">
+      <div class="score-strip" id="score-strip"></div>
+      <div class="timer" id="match-timer">--:--</div>
+      <div class="mode-tag" id="mode-tag"></div>
+    </div>
+
+    <div class="killfeed" id="killfeed"></div>
+
+    <div class="hud-bottom-left">
+      <div class="vitals">
+        <div class="health-row">
+          <svg class="vital-icon" viewBox="0 0 24 24"><path d="M12 21s-8-5.1-8-10.4A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 3.6C20 15.9 12 21 12 21z"/></svg>
+          <div class="health-bar"><i id="health-fill"></i><b id="health-num">100</b></div>
+        </div>
+        <div class="zone" id="zone-label"></div>
+      </div>
+    </div>
+
+    <div class="hud-bottom-right">
+      <div class="ammo">
+        <div class="ammo-main"><b id="ammo-mag">30</b><span id="ammo-reserve">/ 150</span></div>
+        <div class="weapon-name" id="weapon-name">R4-C</div>
+        <div class="weapon-slots">
+          <span class="slot active" data-slot="primary">1</span>
+          <span class="slot" data-slot="secondary">2</span>
+        </div>
+      </div>
+      <div class="reload-hint hidden" id="reload-hint">R — RELOAD</div>
+    </div>
+
+    <div class="damage-vignette" id="damage-vignette"></div>
+    <div class="dir-indicators" id="dir-indicators"></div>
+    <div class="center-toast" id="center-toast"></div>
+    <div class="streak-toast" id="streak-toast"></div>
+    <div class="objective-bar" id="objective-bar"></div>
+    <div class="compass" id="compass"><canvas id="compass-canvas" width="720" height="34"></canvas></div>
+  </div>
+
+  <!-- ================= Death / eliminated by ================= -->
+  <div id="death-screen" class="overlay death hidden">
+    <div class="death-inner">
+      <div class="death-label">ELIMINATED BY</div>
+      <div class="death-banner" id="death-banner"></div>
+      <div class="death-meta" id="death-meta"></div>
+      <div class="respawn" id="respawn-count"></div>
+    </div>
+  </div>
+
+  <!-- ================= Pre-game intro ================= -->
+  <div id="intro" class="overlay intro hidden">
+    <div class="intro-bg"></div>
+    <div class="intro-head">
+      <div class="intro-mode" id="intro-mode">TEAM DEATHMATCH</div>
+      <div class="intro-map" id="intro-map">OLD QUARTER</div>
+    </div>
+    <div class="intro-rosters">
+      <div class="intro-team" id="intro-team-a"></div>
+      <div class="intro-vs">VS</div>
+      <div class="intro-team" id="intro-team-b"></div>
+    </div>
+    <div class="intro-count" id="intro-count"></div>
+  </div>
+
+  <!-- ================= Victory ================= -->
+  <div id="victory" class="overlay victory hidden">
+    <div class="victory-inner">
+      <div class="victory-title" id="victory-title">VICTORY</div>
+      <div class="victory-banner" id="victory-banner"></div>
+      <div class="victory-name" id="victory-name"></div>
+      <table class="board" id="victory-board"></table>
+      <div class="victory-xp" id="victory-xp"></div>
+      <button class="btn primary" id="victory-continue">CONTINUE</button>
+    </div>
+  </div>
+
+  <!-- ================= Scoreboard ================= -->
+  <div id="scoreboard" class="overlay scoreboard hidden">
+    <div class="sb-inner">
+      <div class="sb-head"><span id="sb-mode"></span><span id="sb-score"></span></div>
+      <div class="sb-cols" id="sb-cols"></div>
+    </div>
+  </div>
+
+  <!-- ================= Main menu ================= -->
+  <div id="menu" class="overlay menu hidden">
+    <div class="menu-bg"></div>
+    <header class="menu-head">
+      <div class="wordmark small"><span>B</span>REACH</div>
+      <div class="profile-chip" id="profile-chip">
+        <canvas class="chip-banner" width="220" height="64"></canvas>
+        <div class="chip-text"><b id="chip-name">Operator</b><span id="chip-level">Lv 1</span></div>
+      </div>
+      <div class="online" id="online-count"></div>
+    </header>
+
+    <nav class="menu-tabs">
+      <button class="tab active" data-tab="play">PLAY</button>
+      <button class="tab" data-tab="loadout">LOADOUT</button>
+      <button class="tab" data-tab="profile">PROFILE</button>
+      <button class="tab" data-tab="settings">SETTINGS</button>
+    </nav>
+
+    <section class="panel active" id="tab-play">
+      <div class="play-grid">
+        <div class="modes" id="mode-list"></div>
+        <aside class="play-side">
+          <div class="card party-card">
+            <h3>PARTY</h3>
+            <div id="party-body" class="party-body">
+              <p class="muted">Play solo, or make a party and queue together.</p>
+              <div class="row">
+                <button class="btn" id="party-create">CREATE PARTY</button>
+              </div>
+              <div class="row">
+                <input id="party-code" class="input" maxlength="5" placeholder="CODE" />
+                <button class="btn" id="party-join">JOIN</button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <h3>PRIVATE MATCH</h3>
+            <p class="muted">Your own lobby with a code. Set the mode and fill it with bots.</p>
+            <button class="btn" id="private-create">CREATE PRIVATE MATCH</button>
+          </div>
+          <div class="card">
+            <h3>TRAINING GROUND</h3>
+            <p class="muted">Live range, shoot house and movement course. Every weapon, offline.</p>
+            <button class="btn" id="open-training">ENTER TRAINING</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="panel" id="tab-loadout">
+      <div class="loadout-grid">
+        <div class="weapon-list" id="weapon-list"></div>
+        <div class="weapon-detail" id="weapon-detail"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="tab-profile">
+      <div class="profile-grid">
+        <div class="card">
+          <h3>CALLSIGN</h3>
+          <input id="name-input" class="input wide" maxlength="16" />
+          <h3 style="margin-top:22px">VICTORY FANFARE</h3>
+          <p class="muted">Plays for everyone when you win.</p>
+          <div class="fanfare-list" id="fanfare-list"></div>
+        </div>
+        <div class="card">
+          <h3>BANNER</h3>
+          <p class="muted">Shown in the pre-game intro and whenever you eliminate someone.</p>
+          <div class="banner-grid" id="banner-grid"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="tab-settings">
+      <div class="settings-grid" id="settings-grid"></div>
+    </section>
+  </div>
+
+  <!-- ================= Lobby ================= -->
+  <div id="lobby" class="overlay lobby hidden">
+    <div class="lobby-inner">
+      <div class="lobby-head">
+        <h2 id="lobby-title">PRIVATE MATCH</h2>
+        <div class="lobby-code">CODE <b id="lobby-code">-----</b><button class="btn tiny" id="copy-code">COPY</button></div>
+      </div>
+      <div class="lobby-body">
+        <div class="lobby-members" id="lobby-members"></div>
+        <div class="lobby-config" id="lobby-config"></div>
+      </div>
+      <div class="lobby-actions">
+        <button class="btn" id="lobby-leave">LEAVE</button>
+        <button class="btn primary" id="lobby-start">START MATCH</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Searching ================= -->
+  <div id="searching" class="overlay searching hidden">
+    <div class="search-inner">
+      <div class="radar"><i></i><i></i><i></i></div>
+      <div class="search-mode" id="search-mode">SEARCHING</div>
+      <div class="search-meta" id="search-meta">finding operators…</div>
+      <button class="btn" id="search-cancel">CANCEL</button>
+    </div>
+  </div>
+
+  <!-- ================= Pause ================= -->
+  <div id="pause" class="overlay pause hidden">
+    <div class="pause-inner">
+      <h2>PAUSED</h2>
+      <button class="btn primary" id="pause-resume">RESUME</button>
+      <button class="btn" id="pause-settings">SETTINGS</button>
+      <button class="btn danger" id="pause-leave">LEAVE MATCH</button>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+  <div id="click-to-play" class="click-hint hidden">CLICK TO PLAY</div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

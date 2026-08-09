@@ -1,0 +1,93 @@
+// Game mode definitions — deadshot.io's playlist, sized for 10 players.
+
+export const MODES = {
+  ffa: {
+    id: 'ffa',
+    name: 'Free For All',
+    short: 'FFA',
+    blurb: 'Everyone for themselves. First to 30 eliminations takes it.',
+    teams: false,
+    scoreLimit: 30,
+    timeLimit: 600,
+    minPlayers: 2,
+    maxPlayers: 10,
+    respawn: true,
+    icon: 'ffa',
+  },
+  tdm: {
+    id: 'tdm',
+    name: 'Team Deathmatch',
+    short: 'TDM',
+    blurb: 'Five on five. First squad to 60 eliminations wins the round.',
+    teams: true,
+    scoreLimit: 60,
+    timeLimit: 600,
+    minPlayers: 2,
+    maxPlayers: 10,
+    respawn: true,
+    icon: 'tdm',
+  },
+  dom: {
+    id: 'dom',
+    name: 'Domination',
+    short: 'DOM',
+    blurb: 'Hold A, B and C. Points tick while you own more ground than they do.',
+    teams: true,
+    scoreLimit: 200,
+    timeLimit: 720,
+    minPlayers: 2,
+    maxPlayers: 10,
+    respawn: true,
+    capture: true,
+    tickInterval: 2.0,
+    icon: 'dom',
+  },
+  ctf: {
+    id: 'ctf',
+    name: 'Capture the Flag',
+    short: 'CTF',
+    blurb: 'Take theirs, hold yours. Three captures ends it.',
+    teams: true,
+    scoreLimit: 3,
+    timeLimit: 720,
+    minPlayers: 2,
+    maxPlayers: 10,
+    respawn: true,
+    flags: true,
+    icon: 'ctf',
+  },
+  gg: {
+    id: 'gg',
+    name: 'Gun Game',
+    short: 'GG',
+    blurb: 'Every elimination promotes you. Finish the ladder to win.',
+    teams: false,
+    timeLimit: 900,
+    minPlayers: 2,
+    maxPlayers: 10,
+    respawn: true,
+    ladder: true,
+    icon: 'gg',
+  },
+  oitc: {
+    id: 'oitc',
+    name: 'One in the Chamber',
+    short: 'OITC',
+    blurb: 'One round, one kill. Land it and you get another. Miss and you go melee.',
+    teams: false,
+    scoreLimit: 20,
+    timeLimit: 600,
+    minPlayers: 2,
+    maxPlayers: 10,
+    respawn: true,
+    oneShot: true,
+    icon: 'oitc',
+  },
+};
+
+export const MODE_IDS = Object.keys(MODES);
+export const QUICKPLAY_MODES = ['ffa', 'tdm', 'dom', 'gg'];
+
+export function getMode(id) {
+  return MODES[id] || MODES.ffa;
+}
