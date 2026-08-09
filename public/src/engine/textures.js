@@ -431,6 +431,131 @@ const PAINTERS = {
     }
   },
 
+  gravel(ctx) {
+    const { S, p, rgb, height, rough, metal } = ctx;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        const u = (x / S) * p, v = (y / S) * p;
+        const stone = noise(u * 44, v * 44, p * 44, 311);
+        const clump = fbm(u * 6, v * 6, p, 313, 3);
+        const t = 0.62 + stone * 0.5 + clump * 0.22;
+        rgb[i * 3] = 128 * t; rgb[i * 3 + 1] = 122 * t; rgb[i * 3 + 2] = 112 * t;
+        height[i] = stone * 0.85 + clump * 0.2;
+        rough[i] = 0.95;
+        metal[i] = 0;
+      }
+    }
+  },
+
+  estatebrick(ctx) {
+    const { S, p, rgb, height, rough, metal } = ctx;
+    const rows = 14, cols = 6;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        const fy = (y / S) * rows;
+        const row = Math.floor(fy);
+        const fx = (x / S) * cols + (row % 2 ? 0.5 : 0);
+        const col = Math.floor(fx);
+        const inY = fy - row, inX = fx - col;
+        const mortar = inY < 0.11 || inY > 0.92 || inX < 0.05 || inX > 0.96;
+        const u = (x / S) * p, v = (y / S) * p;
+        const n = fbm(u * 5, v * 5, p, 317, 4);
+        const tint = hash2(col, row, 19);
+        if (mortar) {
+          const g = 152 + n * 22;
+          rgb[i * 3] = g; rgb[i * 3 + 1] = g * 0.98; rgb[i * 3 + 2] = g * 0.93;
+          height[i] = -0.5 + n * 0.1;
+          rough[i] = 0.93;
+        } else {
+          const r = mix(120, 158, tint) * (0.84 + n * 0.3);
+          rgb[i * 3] = r;
+          rgb[i * 3 + 1] = r * mix(0.52, 0.60, tint);
+          rgb[i * 3 + 2] = r * mix(0.44, 0.52, tint);
+          height[i] = 0.42 + n * 0.24;
+          rough[i] = clamp01(0.82 + n * 0.14);
+        }
+        metal[i] = 0;
+      }
+    }
+  },
+
+  estatewood(ctx) {
+    const { S, p, rgb, height, rough, metal } = ctx;
+    const boards = 9;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        const u = (x / S) * p, v = (y / S) * p;
+        const fx = (x / S) * boards;
+        const gap = (fx - Math.floor(fx)) < 0.05;
+        const grain = turbulence(u * 14, v * 1.2, p, 331, 4);
+        const t = (0.5 + grain * 0.36) * (gap ? 0.42 : 1);
+        rgb[i * 3] = 96 * t; rgb[i * 3 + 1] = 70 * t; rgb[i * 3 + 2] = 50 * t;
+        height[i] = gap ? -0.6 : grain * 0.34;
+        rough[i] = 0.9;
+        metal[i] = 0;
+      }
+    }
+  },
+
+  slate(ctx) {
+    const { S, p, rgb, height, rough, metal } = ctx;
+    const rows = 12, cols = 7;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        const fy = (y / S) * rows;
+        const row = Math.floor(fy);
+        const fx = (x / S) * cols + (row % 2 ? 0.5 : 0);
+        const col = Math.floor(fx);
+        const inY = fy - row, inX = fx - col;
+        const edge = inY < 0.08 || inX < 0.04 || inX > 0.97;
+        const u = (x / S) * p, v = (y / S) * p;
+        const n = fbm(u * 8, v * 8, p, 337, 4);
+        const tint = hash2(col, row, 23);
+        const g = mix(52, 78, tint) * (0.82 + n * 0.34);
+        rgb[i * 3] = g * 0.94; rgb[i * 3 + 1] = g * 0.98; rgb[i * 3 + 2] = g * 1.1;
+        height[i] = edge ? -0.55 : 0.3 + n * 0.2;
+        rough[i] = clamp01(0.6 + n * 0.24);
+        metal[i] = 0.12;
+      }
+    }
+  },
+
+  hay(ctx) {
+    const { S, p, rgb, height, rough, metal } = ctx;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        const u = (x / S) * p, v = (y / S) * p;
+        const straw = turbulence(u * 3, v * 40, p, 347, 4);
+        const t = 0.6 + straw * 0.6;
+        rgb[i * 3] = 196 * t; rgb[i * 3 + 1] = 162 * t; rgb[i * 3 + 2] = 78 * t;
+        height[i] = straw * 0.8;
+        rough[i] = 0.96;
+        metal[i] = 0;
+      }
+    }
+  },
+
+  greenframe(ctx) {
+    const { S, p, rgb, height, rough, metal } = ctx;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        const u = (x / S) * p, v = (y / S) * p;
+        const n = fbm(u * 8, v * 8, p, 353, 3);
+        const g = 196 + n * 34;
+        rgb[i * 3] = g; rgb[i * 3 + 1] = g * 1.0; rgb[i * 3 + 2] = g * 0.96;
+        height[i] = n * 0.2;
+        rough[i] = 0.5;
+        metal[i] = 0.2;
+      }
+    }
+  },
+
   bark(ctx) {
     const { S, p, rgb, height, rough, metal } = ctx;
     const base = hexToRgb(0x6b5334);
@@ -613,6 +738,12 @@ const MATERIAL_SETUP = {
   hedge:      { scale: 1.4, relief: 8 },
   fabric:     { scale: 1.6, relief: 3 },
   trim:       { scale: 1.8, relief: 3 },
+  gravel:     { scale: 2.2, relief: 6 },
+  estatebrick:{ scale: 2.6, relief: 9 },
+  estatewood: { scale: 2.2, relief: 6 },
+  slate:      { scale: 2.4, relief: 7 },
+  hay:        { scale: 1.4, relief: 7 },
+  greenframe: { scale: 2.0, relief: 2 },
   bark:       { scale: 1.0, relief: 8 },
   foliage:    { scale: 1.2, relief: 6 },
   targetred:  { scale: 1.0, relief: 2 },

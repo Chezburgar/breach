@@ -295,6 +295,80 @@ export class MapBuilder {
   }
 }
 
+// --- reusable building pieces -------------------------------------------
+
+/**
+ * Switchback stairwell filling a rectangle, one flight pair per floor.
+ * `flip` starts the first flight at the +Z end, for wells entered from the
+ * other side. Returns the geometry a caller needs to place waypoints on it.
+ */
+export function switchback(b, x0, z0, x1, z1, yBase, floorH, floors, mat, railMat = 'metal', flip = false) {
+  const wHalf = (x1 - x0) / 2 - 0.2;
+  const leftC = x0 + wHalf / 2 + 0.2;
+  const rightC = x1 - wHalf / 2 - 0.2;
+  const n = 12;
+  const rise = floorH / 2 / n;
+  const run = 0.30;
+  const runLen = n * run;
+
+  const startA = flip ? z1 - 0.2 : z0 + 0.2;
+  const endA = flip ? startA - runLen : startA + runLen;
+  const landA = flip ? endA - 1.4 : endA;
+  const landB = flip ? endA : endA + 1.4;
+
+  for (let f = 0; f < floors; f++) {
+    const y = yBase + f * floorH;
+    b.stairs(leftC, y, startA, flip ? 0 : Math.PI, n, rise, run, wHalf, mat);
+    b.slab(x0, landA, x1, landB, y + floorH / 2, 0.35, mat);
+    b.stairs(rightC, y + floorH / 2, endA, flip ? Math.PI : 0, n, rise, run, wHalf, mat);
+    b.railing(x0 + wHalf + 0.2, Math.min(startA, endA), x0 + wHalf + 0.2, Math.max(startA, endA),
+      y + floorH / 2, railMat, 1.0);
+  }
+  return {
+    landing: (landA + landB) / 2,
+    leftC, rightC,
+    entry: flip ? startA + 1.2 : startA - 1.2,
+    exit: flip ? endA - 1.2 : endA + 1.2,
+  };
+}
+
+/**
+ * Flat roof with a parapet and a cornice. The cornice is a ring, not a slab —
+ * a slab would roof over any stairwell hole or skylight in the deck below.
+ * `gaps` opens a side so a bridge or stair can land: `{ north: [{at,width}] }`.
+ */
+export function parapet(b, x0, z0, x1, z1, y, mat, h = 1.15, gaps = {}) {
+  const t = 0.34;
+  const o = 0.25;
+  const y0 = y + 0.22, y1 = y + h;
+
+  b.ext(x0 - o, y, z0 - o, x1 + o, y0, z0 + t, mat);
+  b.ext(x0 - o, y, z1 - t, x1 + o, y0, z1 + o, mat);
+  b.ext(x0 - o, y, z0 + t, x0 + t, y0, z1 - t, mat);
+  b.ext(x1 - t, y, z0 + t, x1 + o, y0, z1 - t, mat);
+
+  const open = (list) => (list || []).map((g) => ({ at: g.at, width: g.width, bottom: 0, top: h }));
+  b.wall(x0, z0 + t / 2, x1, z0 + t / 2, y0, y1, t, mat, open(gaps.north));
+  b.wall(x0, z1 - t / 2, x1, z1 - t / 2, y0, y1, t, mat, open(gaps.south));
+  b.wall(x0 + t / 2, z0 + t, x0 + t / 2, z1 - t, y0, y1, t, mat, open(gaps.west));
+  b.wall(x1 - t / 2, z0 + t, x1 - t / 2, z1 - t, y0, y1, t, mat, open(gaps.east));
+}
+
+/**
+ * The hut that caps a stairwell where it reaches a roof. Built as a shell —
+ * a solid block seals the stairs off entirely. The doorway sits over the
+ * flight that tops out here, not centred over a four-metre drop.
+ */
+export function headhouse(b, x0, z0, x1, z1, y, h, mat, door = 'north') {
+  const t = 0.4;
+  const gap = [{ at: (x1 - x0) * 0.71, width: 2.6, bottom: 0, top: 2.3 }];
+  b.wall(x0, z0, x1, z0, y, y + h, t, mat, door === 'north' ? gap : []);
+  b.wall(x0, z1, x1, z1, y, y + h, t, mat, door === 'south' ? gap : []);
+  b.wall(x0, z0, x0, z1, y, y + h, t, mat, []);
+  b.wall(x1, z0, x1, z1, y, y + h, t, mat, []);
+  b.slab(x0 - 0.25, z0 - 0.25, x1 + 0.25, z1 + 0.25, y + h, 0.3, mat);
+}
+
 /** Locate a world position inside a named zone — used by the kill feed. */
 export function zoneAt(mapData, p) {
   for (const z of mapData.zones) {

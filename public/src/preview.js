@@ -10,7 +10,7 @@ import { getMap } from '/shared/maps/index.js';
 
 const hud = document.getElementById('hud');
 const params = new URLSearchParams(location.search);
-const mapId = params.get('map') || 'oldquarter';
+const mapId = params.get('map') || 'estate';
 const quality = params.get('q') || 'high';
 
 const t0 = performance.now();

@@ -167,7 +167,7 @@ export class Renderer {
     this.scene.add(this.sun.target);
 
     // Kept deliberately dim: sky fill this strong washes sun shadows flat.
-    this.hemi = new THREE.HemisphereLight(0xbcd6ff, 0x6a5a44, 0.10);
+    this.hemi = new THREE.HemisphereLight(0xbcd6ff, 0x6a5a44, 0.16);
     this.scene.add(this.hemi);
 
     // The view model gets its own rig so the weapon reads clearly whatever the

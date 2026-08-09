@@ -28,7 +28,7 @@ export class GameRoom {
     this.hub = hub;
     this.id = id;
     this.mode = getMode(mode);
-    this.mapId = mapId || 'oldquarter';
+    this.mapId = mapId || 'estate';
     this.mapData = getMap(this.mapId);
     this.world = buildWorld(this.mapData);
     this.nav = buildNavGraph(this.world, this.mapData);

@@ -72,6 +72,91 @@ const FACTORIES = {
     return parts;
   },
 
+  pine(o, seed) {
+    const r = rnd(seed);
+    const parts = [];
+    const h = 8 + r() * 5;
+    parts.push(cyl([0, h * 0.2, 0], [0.16, 0.3, h * 0.4], 'bark'));
+    const tiers = 7;
+    for (let i = 0; i < tiers; i++) {
+      const t = i / (tiers - 1);
+      parts.push(cone([0, h * (0.2 + t * 0.72), 0], [1.9 - t * 1.5, h * 0.3], 'foliage', [0, r() * 3, 0]));
+    }
+    return parts;
+  },
+
+  tree(o, seed) {
+    const r = rnd(seed);
+    const parts = [];
+    const h = 4.6 + r() * 2.2;
+    parts.push(cyl([0, h * 0.34, 0], [0.22, 0.34, h * 0.68], 'bark'));
+    for (let i = 0; i < 3; i++) {
+      const a = r() * Math.PI * 2;
+      parts.push(cyl(
+        [Math.cos(a) * 0.5, h * 0.62, Math.sin(a) * 0.5],
+        [0.09, 0.13, 1.4], 'bark', [0.5, -a, 0]
+      ));
+    }
+    const canopy = 5 + Math.floor(r() * 3);
+    for (let i = 0; i < canopy; i++) {
+      const a = (i / canopy) * Math.PI * 2;
+      const rad = 1.1 + r() * 0.7;
+      parts.push(sph(
+        [Math.cos(a) * rad * 0.8, h * 0.9 + (r() - 0.5) * 0.8, Math.sin(a) * rad * 0.8],
+        1.3 + r() * 0.6, 'foliage'
+      ));
+    }
+    parts.push(sph([0, h * 1.02, 0], 1.6, 'foliage'));
+    return parts;
+  },
+
+  statue(o, seed) {
+    const r = rnd(seed);
+    return [
+      cyl([0, 0.22, 0], [0.75, 0.9, 0.44], 'marble'),
+      box([0, 0.9, 0], [0.9, 1.0, 0.5], 'marble'),
+      box([0, 1.75, 0], [0.62, 0.8, 0.42], 'marble', [0, r() * 0.4, 0]),
+      sph([0, 2.32, 0], 0.24, 'marble'),
+      box([-0.42, 1.85, 0.12], [0.18, 0.62, 0.18], 'marble', [0, 0, 0.5]),
+      box([0.42, 1.9, -0.1], [0.18, 0.7, 0.18], 'marble', [0.4, 0, -0.3]),
+    ];
+  },
+
+  lamppost() {
+    return [
+      cyl([0, 0.2, 0], [0.26, 0.34, 0.4], 'stone'),
+      cyl([0, 2.3, 0], [0.07, 0.1, 4.2], 'trim'),
+      cyl([0, 4.5, 0], [0.24, 0.1, 0.5], 'trim'),
+      box([0, 4.66, 0], [0.34, 0.34, 0.34], 'lampglass'),
+      cone([0, 4.98, 0], [0.3, 0.34], 'trim'),
+    ];
+  },
+
+  chandelier(o, seed) {
+    const r = rnd(seed);
+    const parts = [
+      cyl([0, 0.1, 0], [0.03, 0.03, 0.5], 'trim'),
+      cyl([0, -0.2, 0], [0.5, 0.4, 0.08], 'trim'),
+    ];
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      parts.push(cyl([Math.cos(a) * 0.46, -0.14, Math.sin(a) * 0.46], [0.05, 0.05, 0.16], 'trim'));
+      parts.push(sph([Math.cos(a) * 0.46, -0.02, Math.sin(a) * 0.46], 0.075, 'lampglass'));
+      void r;
+    }
+    return parts;
+  },
+
+  bed() {
+    return [
+      box([0, 0.2, 0], [2.0, 0.4, 2.4], 'woodDark'),
+      box([0, 0.52, 0], [1.9, 0.28, 2.3], 'fabric'),
+      box([0, 0.72, -0.95], [1.5, 0.2, 0.4], 'fabric'),
+      box([0, 0.85, -1.22], [2.0, 1.3, 0.14], 'woodDark'),
+      box([0, 0.5, 1.22], [2.0, 0.7, 0.14], 'woodDark'),
+    ];
+  },
+
   bush(o, seed) {
     const r = rnd(seed);
     const parts = [];

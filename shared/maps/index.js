@@ -1,8 +1,8 @@
-import { buildOldQuarter } from './oldquarter.js';
+import { buildEstate } from './estate.js';
 import { buildTraining } from './training.js';
 
 const BUILDERS = {
-  oldquarter: buildOldQuarter,
+  estate: buildEstate,
   training: buildTraining,
 };
 
@@ -11,21 +11,22 @@ const cache = new Map();
 /** Maps are deterministic, so build once and share the data everywhere. */
 export function getMap(id) {
   if (!cache.has(id)) {
-    const build = BUILDERS[id] || BUILDERS.oldquarter;
+    const build = BUILDERS[id] || BUILDERS.estate;
     cache.set(id, build());
   }
   return cache.get(id);
 }
 
 export const MAP_IDS = Object.keys(BUILDERS);
-export const COMBAT_MAPS = ['oldquarter'];
+export const COMBAT_MAPS = ['estate'];
+export const DEFAULT_MAP = 'estate';
 
 export const MAP_INFO = {
-  oldquarter: {
-    id: 'oldquarter',
-    name: 'Old Quarter',
-    blurb: 'A coastal compound of tiled plazas, shuttered souks and a consulate that owns every angle.',
-    size: '150 × 150 m',
+  estate: {
+    id: 'estate',
+    name: 'Blackmoor Estate',
+    blurb: 'A walled country estate. Three routes from the gate to the gardens, a manor that overlooks all of them, and a cellar that cuts underneath.',
+    size: '176 × 176 m',
   },
   training: {
     id: 'training',
