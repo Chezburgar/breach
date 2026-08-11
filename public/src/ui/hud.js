@@ -454,8 +454,15 @@ export class HUD {
     $('victory-xp').textContent = mine ? `+${mine.xp} XP EARNED` : '';
 
     el.classList.remove('hidden');
-    const btn = $('victory-continue');
-    btn.onclick = () => { el.classList.add('hidden'); onContinue?.(); };
+
+    // `onContinue` is `{ again, leave, canRestart }`.
+    const again = $('victory-again');
+    const leave = $('victory-leave');
+    const wait = $('victory-wait');
+    again.classList.toggle('hidden', !onContinue?.canRestart);
+    wait.classList.toggle('hidden', !!onContinue?.canRestart);
+    again.onclick = () => { el.classList.add('hidden'); onContinue?.again?.(); };
+    leave.onclick = () => { el.classList.add('hidden'); onContinue?.leave?.(); };
     return won;
   }
 

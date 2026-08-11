@@ -13,6 +13,15 @@ import { PRIMARIES, SECONDARIES } from '../weapons.js';
 import { BANNERS, DEFAULT_FANFARE, BUILTIN_FANFARES } from '../cosmetics.js';
 import { findPath, nearestNode, nearestReachableNode } from './nav.js';
 
+// Fanfare ids the bots can be given. The simulation cannot read the asset
+// manifest itself, so whoever is hosting hands the real list over once it has
+// loaded; until then bots fall back to the synthesised set.
+let FANFARE_POOL = BUILTIN_FANFARES.map((f) => f.id);
+
+export function setBotFanfarePool(ids) {
+  if (Array.isArray(ids) && ids.length) FANFARE_POOL = [...ids];
+}
+
 export const BOT_NAMES = [
   'Kestrel', 'Vulcan', 'Marlow', 'Rooke', 'Ozdemir', 'Bellamy', 'Halden', 'Sable',
   'Cruz', 'Novak', 'Reyes', 'Ferris', 'Iwata', 'Okonkwo', 'Lindqvist', 'Marsh',
@@ -41,7 +50,7 @@ export class Bot {
     this.skill = DIFFICULTIES[tier];
     this.level = 8 + Math.floor(Math.random() * 70);
     this.banner = BANNERS[Math.floor(Math.random() * BANNERS.length)].id;
-    this.fanfare = (BUILTIN_FANFARES[Math.floor(Math.random() * BUILTIN_FANFARES.length)] || {}).id || DEFAULT_FANFARE;
+    this.fanfare = FANFARE_POOL[Math.floor(Math.random() * FANFARE_POOL.length)] || DEFAULT_FANFARE;
 
     const primary = PRIMARIES[Math.floor(Math.random() * PRIMARIES.length)];
     const secondary = SECONDARIES[Math.floor(Math.random() * SECONDARIES.length)];
@@ -189,18 +198,28 @@ export class Bot {
 
       // Combat strafing.
       if (engaging) {
+        // Strafe in long, committed steps. Flipping every half second reads as
+        // a stutter rather than as movement.
         this.strafeTimer -= dt;
         if (this.strafeTimer <= 0) {
-          this.strafeTimer = 0.5 + Math.random() * 0.9;
+          this.strafeTimer = 1.4 + Math.random() * 1.6;
           this.strafeDir = -this.strafeDir;
         }
         btn &= ~(BTN.LEFT | BTN.RIGHT);
         btn |= this.strafeDir > 0 ? BTN.RIGHT : BTN.LEFT;
         btn &= ~BTN.SPRINT;
+
+        // Hysteresis on the range band: without a dead zone the bot flips
+        // between forward and back every tick and vibrates on the spot.
         const dist = vdist(p.state.pos, this.target.state.pos);
-        if (dist > this.preferredRange() + 6) btn |= BTN.FORWARD;
-        else if (dist < this.preferredRange() - 5) btn |= BTN.BACK;
-        else btn &= ~(BTN.FORWARD | BTN.BACK);
+        const want = this.preferredRange();
+        if (this.approach === undefined) this.approach = 0;
+        if (dist > want + 7) this.approach = 1;
+        else if (dist < want - 6) this.approach = -1;
+        else if (Math.abs(dist - want) < 3) this.approach = 0;
+        btn &= ~(BTN.FORWARD | BTN.BACK);
+        if (this.approach > 0) btn |= BTN.FORWARD;
+        else if (this.approach < 0) btn |= BTN.BACK;
         // Aiming down sights costs mobility but collapses the cone of fire —
         // hip-firing while strafing, bots simply never hit anything.
         if (dist > 9) btn |= BTN.ADS;

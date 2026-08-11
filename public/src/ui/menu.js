@@ -519,14 +519,53 @@ export class Menu {
     if (this.group) this.setGroup(this.group, localId);
   }
 
+  /**
+   * The waiting room. Shows the banner of everyone who has turned up and how
+   * long until bots fill the rest — deliberately not a party screen.
+   */
   setSearching(on, info = {}) {
     const el = $('searching');
     el.classList.toggle('hidden', !on);
-    if (!on) return;
-    $('search-mode').textContent = (MODES[info.mode]?.name || 'SEARCHING').toUpperCase();
-    $('search-meta').textContent = info.found != null
-      ? `${info.found} operator${info.found === 1 ? '' : 's'} found · ${info.wait || 0}s`
-      : 'finding operators…';
+    if (!on) { this._searchKey = null; return; }
+
+    $('search-mode').textContent = (MODES[info.mode]?.name || 'FINDING A MATCH').toUpperCase();
+    const found = info.found ?? 0;
+    const target = info.target ?? 10;
+    $('search-meta').textContent = found
+      ? `${found} of ${target} operators · searching ${info.wait || 0}s`
+      : 'looking for operators…';
+
+    const left = Math.max(0, (info.fillAt ?? 0) - (info.wait ?? 0));
+    $('search-fill').textContent = found && left > 0
+      ? `FILLING WITH AI IN ${left}s`
+      : (found ? 'STARTING…' : '');
+
+    const members = info.members || [];
+    const key = members.map((m) => `${m.id}:${m.banner}`).join('|') + `|${target}`;
+    if (this._searchKey === key) return;
+    this._searchKey = key;
+
+    const host = $('search-roster');
+    host.innerHTML = '';
+    for (const m of members) {
+      const slot = document.createElement('div');
+      slot.className = 'sr-slot';
+      const c = document.createElement('canvas');
+      c.width = 280; c.height = Math.round(280 / 3.44);
+      slot.appendChild(c);
+      const name = document.createElement('div');
+      name.className = 'sr-name';
+      name.textContent = m.name;
+      slot.appendChild(name);
+      host.appendChild(slot);
+      drawBanner(c, m.banner, {});
+    }
+    for (let i = members.length; i < Math.min(target, 10); i++) {
+      const slot = document.createElement('div');
+      slot.className = 'sr-slot empty';
+      slot.textContent = 'OPEN';
+      host.appendChild(slot);
+    }
   }
 
   toast(text, bad) {

@@ -53,7 +53,12 @@ export const MOVE = {
 export const VIEW = {
   baseFov: 90,
   viewmodelFov: 62,
-  near: 0.02,
+  // The near plane is the single biggest lever on depth precision: error grows
+  // as z²/near, so 0.02 left centimetres of slop on ground a hundred metres out
+  // and the layered surface patches flickered against each other. Nothing in
+  // the world scene is ever closer than the player's 0.36 m collision radius —
+  // the view model has its own camera — so 0.15 costs nothing and buys 7×.
+  near: 0.1,
   far: 900,
   sprintFovAdd: 8,
   maxPitch: Math.PI / 2 - 0.02,

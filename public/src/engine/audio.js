@@ -562,6 +562,14 @@ export class AudioEngine {
           name: f.name || f.file.replace(/\.[a-z0-9]+$/i, ''),
           file: new URL(f.file, base).href,
         }));
+
+      // Bots draw their victory fanfare from the same pool the players do.
+      // Seeding it here rather than off a user gesture means a bot created
+      // before anyone touched the page still gets a real one.
+      if (this.fanfareFiles.length) {
+        const { setBotFanfarePool } = await import('/shared/sim/bots.js');
+        setBotFanfarePool(this.fanfareFiles.map((f) => f.id));
+      }
     } catch {
       // No manifest — the built-in synthesised set is used.
     }

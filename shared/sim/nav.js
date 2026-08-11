@@ -57,7 +57,10 @@ export function buildNavGraph(world, mapData) {
 /** Nudge a waypoint out of geometry and onto the floor beneath it. */
 function settle(world, p) {
   const R = PLAYER.radius;
-  for (const lift of [0, 0.3, 0.7, 1.2]) {
+  // Small lifts first. Waypoints are authored at ground level, and a floor
+  // slab a few centimetres thick is enough to bury one — jumping straight to
+  // 0.3 m then throws the node away when there is a stair landing overhead.
+  for (const lift of [0, 0.1, 0.2, 0.3, 0.7, 1.2]) {
     const test = { x: p.x, y: p.y + lift, z: p.z };
     if (cylinderBlocked(world, test, R, PLAYER.standHeight)) continue;
     const g = groundUnder(world, test.x, test.z, R, test.y + 0.1, test.y - 2.5);

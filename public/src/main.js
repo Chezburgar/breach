@@ -72,7 +72,6 @@ async function main() {
     },
     onHost: async () => {
       audio.unlock();
-      menu.setSearching(true, { mode: 'breach' });
       try {
         const res = await net.hostPrivate('breach', 6);
         menu.setSearching(false);
@@ -139,12 +138,19 @@ async function main() {
     menu.renderFanfares();
   });
 
-  net.on('queue', (msg) => {
-    if (msg.searching) menu.setSearching(true, msg);
-    else menu.setSearching(false);
+  // Public matchmaking sends a waiting-room roster; a private match sends a
+  // lobby with a code. They are deliberately different screens.
+  net.on('search', (msg) => menu.setSearching(true, msg));
+  net.on('group', (msg) => {
+    menu.setSearching(false);
+    menu.setGroup(msg.group, net.id);
   });
-
-  net.on('group', (msg) => menu.setGroup(msg.group, net.id));
+  // Tuck the lobby away rather than forgetting it — a private match goes back
+  // to the same lobby when it ends.
+  net.on('match.start', () => {
+    menu.setSearching(false);
+    menu.hideLobby();
+  });
   net.on('status', ({ status, detail }) => {
     if (status === 'searching' || status === 'hosting' || status === 'connecting') {
       menu.setSearching(true, { mode: 'breach', found: 0, wait: 0, detail });
@@ -160,7 +166,10 @@ async function main() {
   });
 
   // Audio needs a user gesture before it can start.
-  const unlock = async () => { await audio.unlock(); menu.renderFanfares(); };
+  const unlock = async () => {
+    await audio.unlock();
+    menu.renderFanfares();
+  };
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
 

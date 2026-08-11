@@ -116,7 +116,11 @@
       <div class="victory-name" id="victory-name"></div>
       <table class="board" id="victory-board"></table>
       <div class="victory-xp" id="victory-xp"></div>
-      <button class="btn primary" id="victory-continue">CONTINUE</button>
+      <div class="victory-actions">
+        <button class="btn primary" id="victory-again">PLAY AGAIN</button>
+        <button class="btn" id="victory-leave">LEAVE</button>
+      </div>
+      <div class="victory-wait hidden" id="victory-wait">waiting for the host…</div>
     </div>
   </div>
 
@@ -154,9 +158,9 @@
           <div class="card party-card">
             <h3>PARTY</h3>
             <div id="party-body" class="party-body">
-              <p class="muted">Play solo, or make a party and queue together.</p>
+              <p class="muted">Open a lobby and share the code, or join a friend's.</p>
               <div class="row">
-                <button class="btn" id="party-create">CREATE PARTY</button>
+                <button class="btn" id="party-create">CREATE LOBBY</button>
               </div>
               <div class="row">
                 <input id="party-code" class="input" maxlength="5" placeholder="CODE" />
@@ -229,8 +233,10 @@
   <div id="searching" class="overlay searching hidden">
     <div class="search-inner">
       <div class="radar"><i></i><i></i><i></i></div>
-      <div class="search-mode" id="search-mode">SEARCHING</div>
-      <div class="search-meta" id="search-meta">finding operators…</div>
+      <div class="search-mode" id="search-mode">FINDING A MATCH</div>
+      <div class="search-meta" id="search-meta">looking for operators…</div>
+      <div class="search-roster" id="search-roster"></div>
+      <div class="search-fill" id="search-fill"></div>
       <button class="btn" id="search-cancel">CANCEL</button>
     </div>
   </div>

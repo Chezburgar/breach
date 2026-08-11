@@ -9,8 +9,12 @@
 import { MapBuilder, switchback, parapet, headhouse } from './builder.js';
 
 // Manor floor levels.
-const F0 = 0, F1 = 4.6, F2 = 9.2, ROOF = 13.8;
+const F0 = 0.09, F1 = 4.6, F2 = 9.2, ROOF = 13.8;
 const CELLAR = -4.6;
+// Vertical gap between layered outdoor surface patches.
+const PATCH_STEP = 0.012;
+// Interior floors clear the tallest patch stack by a comfortable margin.
+const FLOOR = 0.09;
 
 // Manor footprint.
 const MX0 = -34, MX1 = 34, MZ0 = -26, MZ1 = 24;
@@ -55,11 +59,25 @@ export function buildEstate() {
 function ground(b) {
   b.slabHoles(-94, -94, 94, 94, -0.35, 0.7, 'dirt', GROUND_HOLES);
 
-  // Each surface sits a hair above the last; coplanar patches z-fight.
-  let layer = 0;
-  const patch = (x0, z0, x1, z1, m) =>
-    b.slabHoles(x0 - 0.04, z0 - 0.04, x1 + 0.04, z1 + 0.04,
-      (layer++) * 0.0012, 0.65, m, GROUND_HOLES);
+  // Overlapping surfaces are layered so no two are coplanar. A hair of
+  // separation is not enough: over a 190 m map the depth buffer cannot
+  // resolve slabs a millimetre apart at the far end and the ground flickers
+  // between materials as you turn. Each patch takes the lowest level that
+  // clears everything it touches, so the stack stays a couple of centimetres
+  // tall however many patches get added.
+  const placed = [];
+  const patch = (x0, z0, x1, z1, m) => {
+    let level = 0;
+    for (const q of placed) {
+      // Patches are laid with a 4 cm margin, so ones that merely abut overlap.
+      if (x0 - 0.05 < q.x1 && x1 + 0.05 > q.x0 && z0 - 0.05 < q.z1 && z1 + 0.05 > q.z0) {
+        level = Math.max(level, q.level + 1);
+      }
+    }
+    placed.push({ x0, z0, x1, z1, level });
+    return b.slabHoles(x0 - 0.04, z0 - 0.04, x1 + 0.04, z1 + 0.04,
+      level * PATCH_STEP, 0.65, m, GROUND_HOLES);
+  };
 
   patch(-94, -94, 94, 94, 'grass');
   patch(-14, -88, 14, -50, 'gravel');          // the drive
@@ -109,7 +127,7 @@ function gatehouse(b) {
   // Twin towers either side of an arched gate — attacker spawn sits behind it.
   for (const sx of [-1, 1]) {
     const x0 = sx > 0 ? 8 : -20, x1 = sx > 0 ? 20 : -8;
-    b.slab(x0, Z - 7, x1, Z + 7, 0, 0.5, 'stone');
+    b.slab(x0, Z - 7, x1, Z + 7, FLOOR, 0.5, 'stone');
     b.wall(x0, Z - 7, x1, Z - 7, 0, H, 0.6, 'estatebrick', [
       { at: 6, width: 2.4, bottom: 0, top: 3.0 },
       { at: 6, width: 2.0, bottom: 4.8, top: 6.6, fill: 'glass' },
@@ -142,7 +160,7 @@ function gatehouse(b) {
   // Lodge huts flanking the drive, small and enterable.
   for (const sx of [-1, 1]) {
     const cx = sx * 26;
-    b.slab(cx - 5, -74, cx + 5, -64, 0, 0.4, 'wood');
+    b.slab(cx - 5, -74, cx + 5, -64, FLOOR, 0.4, 'wood');
     b.wall(cx - 5, -74, cx + 5, -74, 0, 3.4, 0.4, 'wood', [{ at: 5, width: 2.2, bottom: 0, top: 2.5 }]);
     b.wall(cx - 5, -64, cx + 5, -64, 0, 3.4, 0.4, 'wood', [{ at: 5, width: 2.2, bottom: 1.0, top: 2.6, fill: 'glass' }]);
     b.wall(cx - 5, -74, cx - 5, -64, 0, 3.4, 0.4, 'wood', [{ at: 5, width: 2.0, bottom: 0, top: 2.5 }]);
@@ -368,7 +386,7 @@ function manor(b) {
 // -------------------------------------------------------------- west wing
 function chapelWing(b) {
   const X0 = -68, X1 = -38, Z0 = -18, Z1 = 18, H = 10.5;
-  b.slab(X0, Z0, X1, Z1, 0, 0.5, 'stone');
+  b.slab(X0, Z0, X1, Z1, FLOOR, 0.5, 'stone');
 
   b.wall(X0, Z0, X1, Z0, 0, H, 0.6, 'stone', [
     { at: 15, width: 3.0, bottom: 0, top: 3.4 },
@@ -412,7 +430,7 @@ function chapelWing(b) {
 
   // Bell tower over the west end — a shell, not a solid block.
   const TZ0 = Z0 + 12, TZ1 = Z0 + 24;
-  b.slab(X0 - 6, TZ0, X0, TZ1, 0, 0.5, 'stone');
+  b.slab(X0 - 6, TZ0, X0, TZ1, FLOOR, 0.5, 'stone');
   b.wall(X0 - 6, TZ0, X0, TZ0, 0, 18, 0.5, 'stone', []);
   b.wall(X0 - 6, TZ1, X0, TZ1, 0, 18, 0.5, 'stone', []);
   b.wall(X0 - 6, TZ0, X0 - 6, TZ1, 0, 18, 0.5, 'stone',
@@ -431,7 +449,7 @@ function chapelWing(b) {
 // -------------------------------------------------------------- east wing
 function stableWing(b) {
   const X0 = 38, X1 = 68, Z0 = -18, Z1 = 18, H = 6.4, LOFT = 3.6;
-  b.slab(X0, Z0, X1, Z1, 0, 0.5, 'wood');
+  b.slab(X0, Z0, X1, Z1, FLOOR, 0.5, 'wood');
 
   b.wall(X0, Z0, X1, Z0, 0, H, 0.5, 'estatewood', [
     { at: 8, width: 3.6, bottom: 0, top: 3.6 }, { at: 22, width: 3.6, bottom: 0, top: 3.6 },
@@ -520,7 +538,7 @@ function gardens(b) {
     b.ext(x - 0.35, 0, z - 0.35, x + 0.35, 2.4, z + 0.35, 'bark');
   }
   const GX0 = 20, GX1 = 34, GZ0 = 62, GZ1 = 78;
-  b.slab(GX0, GZ0, GX1, GZ1, 0, 0.4, 'stone');
+  b.slab(GX0, GZ0, GX1, GZ1, FLOOR, 0.4, 'stone');
   for (const [ax, az, bx, bz, at] of [
     [GX0, GZ0, GX1, GZ0, 7], [GX0, GZ1, GX1, GZ1, 7],
     [GX0, GZ0, GX0, GZ1, 8], [GX1, GZ0, GX1, GZ1, 8],
@@ -545,7 +563,7 @@ function gardens(b) {
   b.ext(-4.2, 3.4, 59.2, 4.2, 3.9, 67.6, 'slate');
 
   const OX0 = -30, OX1 = -6, OZ0 = 64, OZ1 = 80;
-  b.slab(OX0, OZ0, OX1, OZ1, 0, 0.4, 'stone');
+  b.slab(OX0, OZ0, OX1, OZ1, FLOOR, 0.4, 'stone');
   b.wall(OX0, OZ0, OX1, OZ0, 0, 5.2, 0.5, 'stone', [
     { at: 12, width: 3.4, bottom: 0, top: 3.4 },
     { at: 5, width: 2.6, bottom: 1.0, top: 3.4, fill: 'glass' },

@@ -418,6 +418,7 @@ export class Session {
   // ------------------------------------------------------------------ host
   becomeHost(code, { isPrivate, slot = null }) {
     this.isHost = true;
+    this.isPrivateLobby = !!isPrivate;
     this.code = code;
     this.slot = slot;
     this.connected = true;
@@ -599,27 +600,51 @@ export class Session {
     }
   }
 
-  /** Lobby roster, in the shape the menu already understands. */
+  /**
+   * Tell everyone who is here.
+   *
+   * Public matchmaking is not a party: it is a waiting room that shows who has
+   * turned up and then starts. Only an explicitly created private match gets
+   * the lobby screen with a code and a start button.
+   */
   pushLobby() {
     if (!this.isHost) return;
     const members = [...this.clients.values()].map((c) => ({
       id: c.id, name: c.name, banner: c.banner, level: c.level,
     }));
-    const payload = {
-      t: 'group',
-      group: {
-        code: this.code,
-        kind: this.room?.isPrivate ? 'private' : 'party',
-        leaderId: this.localClient.id,
-        mode: this.pendingMode,
-        map: DEFAULT_MAP,
-        bots: this.pendingBots,
-        queued: false,
-        members,
-      },
-    };
-    this.broadcastAll(payload);
-    this.broadcastAll({ t: 'queue', mode: this.pendingMode, searching: true, found: members.length, wait: Math.round(this.lobbyAge()) });
+
+    if (this.isPrivateLobby) {
+      this.broadcastAll({
+        t: 'group',
+        group: {
+          code: this.code,
+          kind: 'private',
+          leaderId: this.localClient.id,
+          mode: this.pendingMode,
+          map: DEFAULT_MAP,
+          bots: this.pendingBots,
+          members,
+        },
+      });
+      return;
+    }
+
+    this.broadcastAll({
+      t: 'search',
+      mode: this.pendingMode,
+      members,
+      found: members.length,
+      target: MATCH_TARGET,
+      wait: Math.round(this.lobbyAge()),
+      fillAt: Math.round(this.fillDeadline()),
+    });
+  }
+
+  /** Seconds from lobby open until bots top the match up. */
+  fillDeadline() {
+    const humans = this.clients.size;
+    if (humans >= 4) return LOBBY_PARTIAL_WAIT;
+    return LOBBY_FILL_WAIT;
   }
 
   lobbyAge() {
@@ -628,6 +653,9 @@ export class Session {
 
   lobbyTick() {
     if (!this.room || this.room.phase !== 'lobby') return;
+    // A private match waits for its host to press start; it never fills itself.
+    if (this.isPrivateLobby) return;
+
     const humans = this.clients.size;
     const age = this.lobbyAge();
 
@@ -635,13 +663,7 @@ export class Session {
       || (humans >= 4 && age >= LOBBY_PARTIAL_WAIT)
       || (humans >= 1 && age >= LOBBY_FILL_WAIT);
 
-    if (!ready) {
-      this.broadcastAll({
-        t: 'queue', mode: this.pendingMode, searching: true,
-        found: humans, wait: Math.round(age),
-      });
-      return;
-    }
+    if (!ready) { this.pushLobby(); return; }
     this.startMatch(Math.max(0, MATCH_TARGET - humans));
   }
 
@@ -655,7 +677,39 @@ export class Session {
     // Teams are assigned as players are added, so add them in a stable order.
     for (const client of this.clients.values()) this.room.addClient(client);
     this.room.begin();
-    this.broadcastAll({ t: 'queue', searching: false });
+  }
+
+  /**
+   * Put a fresh match together with whoever is still here. Host only — a guest
+   * pressing "play again" would have nothing to restart.
+   */
+  restartMatch() {
+    if (!this.isHost) return;
+    if (this.room) { this.room.dispose(); this.room = null; }
+    if (this.lobbyTimer) clearInterval(this.lobbyTimer);
+
+    const hub = {
+      send: (client, msg) => client?.deliver?.(msg),
+      destroyRoom: (room) => {
+        room.dispose();
+        if (this.room === room) this.room = null;
+        this.broadcastAll({ t: 'match.over' });
+      },
+    };
+    this.room = new GameRoom(hub, {
+      id: this.code,
+      mode: this.pendingMode,
+      mapId: DEFAULT_MAP,
+      isPrivate: this.isPrivateLobby,
+      botCount: 0,
+    });
+    for (const c of this.clients.values()) c.room = null;
+
+    // A rematch has its crowd already; don't make them sit out the full wait.
+    this.lobbyOpenedAt = performance.now() / 1000 - Math.max(0, this.fillDeadline() - 8);
+    this.pushLobby();
+    this.lobbyTimer = setInterval(() => this.lobbyTick(), 500);
+    this.broadcastAll({ t: 'rematch' });
   }
 
   broadcastAll(msg) {

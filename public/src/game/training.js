@@ -263,5 +263,10 @@ export class TrainingMode {
 
   dispose() {
     this.scene.remove(this.root);
+    this.root.traverse((o) => { if (o.isMesh) o.geometry?.dispose?.(); });
+    this.targets.length = 0;
+    this.stands.length = 0;
+    this.projectiles.length = 0;
+    this.nearStand = null;
   }
 }
