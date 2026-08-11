@@ -205,6 +205,7 @@ export class Game {
 
   // ---------------------------------------------------------------- match
   async startMatch(msg) {
+    this.audio.stopMenuMusic();
     const mode = getMode(msg.mode);
     // Leaving the training ground has to take its targets and racks with it,
     // or they turn up scattered across the estate.
@@ -536,10 +537,12 @@ export class Game {
     document.getElementById('click-to-play').classList.add('hidden');
     this.menu.show();
     this.menu.restoreLobby(this.net.id);
+    this.audio.startMenuMusic();
   }
 
   // ------------------------------------------------------------- training
   async enterTraining() {
+    this.audio.stopMenuMusic();
     await this.setMap('training');
     this.inMatch = true;
     this.match = {

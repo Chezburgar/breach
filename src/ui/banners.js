@@ -46,6 +46,67 @@ export function findBanner(id) {
   return customBanners.find((b) => b.id === id) || bannerById(id);
 }
 
+/**
+ * Add a banner at runtime — an upload, or somebody else's upload arriving over
+ * the wire. `image` is a data URL. Resolves once the bitmap is decoded, so the
+ * caller can redraw immediately instead of painting a blank canvas.
+ */
+export function registerBanner({ id, name, image, rarity = 'legendary' }) {
+  if (!id || !image) return Promise.resolve(null);
+  const existing = customBanners.find((b) => b.id === id);
+  const def = existing || { id, name: name || 'Custom', rarity, image, uploaded: true };
+  def.image = image;
+  if (!existing) customBanners.push(def);
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(def);
+    img.onerror = () => resolve(def);
+    img.src = image;
+    imageCache.set(id, img);
+  });
+}
+
+/** Everything a peer needs to draw one of our uploads. */
+export function bannerArt(id) {
+  const def = customBanners.find((b) => b.id === id);
+  return def?.uploaded ? { id: def.id, name: def.name, image: def.image } : null;
+}
+
+/**
+ * Read an image file and turn it into a banner. Scaled down and re-encoded so
+ * it is small enough to hand to every other player over the data channel —
+ * a 4 MB phone photo is not something to put on the wire mid-match.
+ */
+export function bannerFromFile(file) {
+  const W = 688, H = Math.round(W / 3.44);
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type)) return reject(new Error('That is not an image.'));
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Could not decode that image.'));
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const ctx = c.getContext('2d');
+        // Cover-fit, same as the painter does, so what you pick is what you get.
+        const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+        const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+        ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+        resolve({
+          id: `usr_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+          name: (file.name || 'Custom').replace(/\.[a-z0-9]+$/i, '').slice(0, 22) || 'Custom',
+          image: c.toDataURL('image/jpeg', 0.72),
+        });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // ----------------------------------------------------------- patterns
 function paintPattern(ctx, w, h, def) {
   const [bg, c1, c2] = def.colors;

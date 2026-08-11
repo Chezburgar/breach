@@ -28,17 +28,41 @@ export const BOT_NAMES = [
   'Duval', 'Petrov', 'Achebe', 'Quill',
 ];
 
-// Bot skill. `error` is the aim wobble in degrees, `drift` a slow random walk
-// that keeps them from converging on a perfect solution, and `settle` how long
-// their aim keeps improving after acquiring a target — without it a bot snaps
-// to a pixel-perfect solution the instant it sees you, which is what makes
-// fighting them feel unfair rather than hard.
+// Bot skill.
+//
+// The thing that makes a bot feel like an aimbot is not how small its error
+// is, it is that the error is *fresh every tick*. Jitter resampled at 120 Hz
+// averages out to the centre of your chest over a burst, so a bot with a
+// three-degree wobble still kills you in three rounds. Three things fix that,
+// and all three are modelled here:
+//
+//   `bias`    a miss picked once per burst and held for the whole burst, so
+//             whole bursts go wide the way a real player's do
+//   `lag`     the bot aims at where you were, not where you are, so strafing
+//             and repeaking actually beat it
+//   `error`   the residual per-shot wobble on top
+//
+// `settle` is how long aim keeps tightening after acquiring, so a bot that
+// has just spotted you is not instantly on target.
 const DIFFICULTIES = [
-  { name: 'Recruit', turn: 1.8, error: 7.0, drift: 3.4, reaction: 0.68, burst: [2, 4], range: 34, accuracy: 0.30, settle: 1.6 },
-  { name: 'Regular', turn: 2.6, error: 5.2, drift: 2.6, reaction: 0.52, burst: [3, 6], range: 44, accuracy: 0.42, settle: 1.3 },
-  { name: 'Veteran', turn: 3.6, error: 3.6, drift: 1.8, reaction: 0.40, burst: [3, 7], range: 56, accuracy: 0.55, settle: 1.0 },
-  { name: 'Elite',   turn: 4.8, error: 2.4, drift: 1.2, reaction: 0.30, burst: [4, 8], range: 68, accuracy: 0.68, settle: 0.8 },
+  { name: 'Recruit', turn: 1.5, error: 6.5, bias: 9.0, lag: 0.38, drift: 3.4, reaction: 1.15, burst: [2, 3], rest: [0.70, 1.40], range: 30, accuracy: 0.22, settle: 2.4 },
+  { name: 'Regular', turn: 2.0, error: 5.2, bias: 7.0, lag: 0.30, drift: 2.6, reaction: 0.95, burst: [2, 4], rest: [0.55, 1.15], range: 38, accuracy: 0.32, settle: 2.0 },
+  { name: 'Veteran', turn: 2.7, error: 4.0, bias: 5.0, lag: 0.22, drift: 1.9, reaction: 0.74, burst: [3, 5], rest: [0.45, 0.95], range: 48, accuracy: 0.44, settle: 1.6 },
+  { name: 'Elite',   turn: 3.4, error: 3.0, bias: 3.4, lag: 0.16, drift: 1.4, reaction: 0.58, burst: [3, 6], rest: [0.35, 0.78], range: 58, accuracy: 0.55, settle: 1.2 },
 ];
+
+// Which tiers turn up, and how often. Weighted towards the bottom: a lobby
+// where every bot is Elite is not a hard game, it is an unfair one.
+const TIER_WEIGHTS = [0.42, 0.34, 0.18, 0.06];
+
+function pickTier() {
+  let r = Math.random();
+  for (let i = 0; i < TIER_WEIGHTS.length; i++) {
+    r -= TIER_WEIGHTS[i];
+    if (r <= 0) return i;
+  }
+  return 0;
+}
 
 export class Bot {
   constructor(room, name) {
@@ -46,8 +70,7 @@ export class Bot {
     this.name = name;
     this.player = null;
 
-    const tier = Math.min(3, Math.floor(Math.random() * 3.4));
-    this.skill = DIFFICULTIES[tier];
+    this.skill = DIFFICULTIES[pickTier()];
     this.level = 8 + Math.floor(Math.random() * 70);
     this.banner = BANNERS[Math.floor(Math.random() * BANNERS.length)].id;
     this.fanfare = FANFARE_POOL[Math.floor(Math.random() * FANFARE_POOL.length)] || DEFAULT_FANFARE;
@@ -87,6 +110,50 @@ export class Bot {
     this.scanYaw = Math.random() * Math.PI * 2;
     this.stuckTimer = 0;
     this.lastPos = null;
+    this.trail = [];        // where the target has been, for aim lag
+    this.biasYaw = 0;       // this burst's miss, held until the burst ends
+    this.biasPitch = 0;
+    this.kickYaw = 0;       // accumulated muzzle climb
+    this.kickPitch = 0;
+  }
+
+  /** A fresh miss for the burst about to be fired. */
+  rerollBias() {
+    const b = this.skill.bias * (Math.PI / 180);
+    // Gaussian-ish: most bursts are close, some are badly off.
+    const g = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
+    this.biasYaw = g() * b;
+    this.biasPitch = g() * b * 0.6;
+  }
+
+  /**
+   * Where the bot believes the target is: its position `lag` seconds ago.
+   * Aiming at the live position is the single biggest reason bots feel
+   * inhuman — nothing you do in the moment can make them miss.
+   */
+  laggedPosition(target, now) {
+    const want = now - this.skill.lag;
+    const trail = this.trail;
+    if (!trail.length) return target.state.pos;
+    for (let i = trail.length - 1; i >= 0; i--) {
+      if (trail[i].t <= want) {
+        const b = trail[Math.min(i + 1, trail.length - 1)];
+        const a = trail[i];
+        const span = b.t - a.t;
+        const f = span > 1e-4 ? Math.min(1, (want - a.t) / span) : 0;
+        return { x: a.p.x + (b.p.x - a.p.x) * f, y: a.p.y + (b.p.y - a.p.y) * f, z: a.p.z + (b.p.z - a.p.z) * f };
+      }
+    }
+    return trail[0].p;
+  }
+
+  recordTrail(target, now) {
+    if (!target) { this.trail.length = 0; return; }
+    const last = this.trail[this.trail.length - 1];
+    if (!last || now - last.t > 0.03) {
+      this.trail.push({ t: now, p: { ...target.state.pos } });
+      while (this.trail.length > 2 && this.trail[0].t < now - 0.6) this.trail.shift();
+    }
   }
 
   /** Sight is blocked by walls and by smoke alike. */
@@ -132,6 +199,8 @@ export class Bot {
     let desiredPitch = this.aimPitch;
     const engaging = live && this.target && this.target.alive && this.reactTimer <= 0;
 
+    this.recordTrail(this.target, room.time);
+
     if (this.target && this.target.alive) {
       const aimPoint = this.aimPointFor(this.target);
       const d = vnorm(vsub(aimPoint, eye));
@@ -141,8 +210,11 @@ export class Bot {
       // correct, and never fully converges — there is always residual wobble
       // plus a slow drift the bot has to chase.
       const held = Math.max(0, room.time - this.targetAcquiredAt);
+      // Aim tightens while they hold you, but only so far — it tops out at
+      // 70% of the starting wobble, so there is no point at which a bot has
+      // simply solved the shot.
       const converge = Math.min(1, held / this.skill.settle);
-      const wobble = this.skill.error * (1 - converge * 0.55) * (Math.PI / 180);
+      const wobble = this.skill.error * (1 - converge * 0.3) * (Math.PI / 180);
 
       this.driftT = (this.driftT || 0) + dt;
       const drift = this.skill.drift * (Math.PI / 180);
@@ -150,9 +222,11 @@ export class Bot {
                + Math.sin(this.driftT * 2.9 + this.seedOffset() * 2) * drift * 0.4;
       const dp = Math.cos(this.driftT * 0.9 + this.seedOffset()) * drift * 0.7;
 
-      desiredYaw = a.yaw + dy + Math.sin(room.time * 3.1 + this.seedOffset()) * wobble;
-      desiredPitch = a.pitch + dp + Math.cos(room.time * 2.3 + this.seedOffset()) * wobble * 0.6;
-    } else if (this.lastKnown) {
+      desiredYaw = a.yaw + this.biasYaw + dy + Math.sin(room.time * 3.1 + this.seedOffset()) * wobble;
+      desiredPitch = a.pitch + this.biasPitch + dp + Math.cos(room.time * 2.3 + this.seedOffset()) * wobble * 0.6;
+    } else if (this.lastKnown && room.time - this.targetSeenAt < 1.6) {
+      // Only stare at where they went for a moment. Holding the angle for six
+      // seconds while walking somewhere else is what makes bots moonwalk.
       const d = vnorm(vsub(this.lastKnown, eye));
       const a = anglesFromDir(d);
       desiredYaw = a.yaw; desiredPitch = a.pitch;
@@ -178,6 +252,19 @@ export class Bot {
         const dx = moveTarget.x - p.state.pos.x + (sep ? sep.x * 1.2 : 0);
         const dz = moveTarget.z - p.state.pos.z + (sep ? sep.z * 1.2 : 0);
         const dist = Math.hypot(dx, dz);
+
+        // Out of a fight, walk facing where you are going. Bots that hold an
+        // angle while their feet carry them somewhere else moonwalk across
+        // the map, and the movement keys they end up pressing are BACK and
+        // strafe, which is exactly what that looks like.
+        if (!engaging && dist > 1.2) {
+          const travelYaw = Math.atan2(-dx, -dz);
+          if (Math.abs(angleDelta(this.aimYaw, travelYaw)) > 0.7) {
+            const t2 = this.skill.turn * dt * 1.2;
+            this.aimYaw += clamp(angleDelta(this.aimYaw, travelYaw), -t2, t2);
+          }
+        }
+
         if (dist > 0.6) {
           // Convert world direction into forward/strafe relative to the aim.
           const fx = -Math.sin(this.aimYaw), fz = -Math.cos(this.aimYaw);
@@ -270,20 +357,32 @@ export class Bot {
         const fireMode = slot.rw.def.fireModes[0];
         if (fireMode === 'semi' || fireMode === 'pump') {
           // Semi-autos need the trigger released between shots, so pulse it.
-          this.triggerPhase = (this.triggerPhase || 0) + dt;
-          const period = Math.max(interval, 0.16) * 2;
-          if (this.triggerPhase % period < period * 0.5) btn |= BTN.FIRE;
+          const prev = this.triggerPhase || 0;
+          this.triggerPhase = prev + dt;
+          const period = Math.max(interval, 0.22) * 2;
+          const phase = this.triggerPhase % period;
+          // Every pull is its own "burst", so every pull gets its own miss.
+          // Without this, marksman rifles and pistols had no bias at all and
+          // were the deadliest things on the map.
+          if (phase < prev % period) this.rerollBias();
+          if (phase < period * 0.5) btn |= BTN.FIRE;
         } else {
           this.burstRest -= dt;
           if (this.burstLeft <= 0 && this.burstRest <= 0) {
             const [lo, hi] = this.skill.burst;
             const shots = lo + Math.floor(Math.random() * (hi - lo + 1));
             this.burstLeft = shots * interval;
+            // A new burst gets a new miss. Rerolling per shot would average
+            // out to a hit; held for the burst, whole bursts go wide.
+            this.rerollBias();
           }
           if (this.burstLeft > 0) {
             btn |= BTN.FIRE;
             this.burstLeft -= dt;
-            if (this.burstLeft <= 0) this.burstRest = 0.15 + Math.random() * 0.35;
+            if (this.burstLeft <= 0) {
+              const [rlo, rhi] = this.skill.rest;
+              this.burstRest = rlo + Math.random() * (rhi - rlo);
+            }
           }
         }
       }
@@ -294,7 +393,31 @@ export class Bot {
       }
     }
 
-    p.cmd = { seq: (p.cmd?.seq || 0) + 1, btn, yaw: this.aimYaw, pitch: this.aimPitch };
+    // ---- Recoil ----------------------------------------------------------
+    // Nothing else here made bots feel like machines as much as this did:
+    // holding the trigger cost them nothing, so the tenth round of a burst
+    // was as accurate as the first. Now the muzzle climbs while they fire and
+    // settles when they stop, and long bursts walk off target the way yours
+    // do. `control` is how much of it the tier fights down.
+    const firing = !!(btn & BTN.FIRE);
+    if (firing) {
+      const slot = p.weapons[p.slot];
+      const per = Math.max(0.05, slot?.rw?.shotInterval ?? 0.1);
+      const control = 0.42 + this.skill.accuracy * 0.5;
+      const kick = (dt / per) * (1 - control) * (Math.PI / 180);
+      this.kickPitch += kick * 2.6;
+      this.kickYaw += (Math.random() - 0.5) * kick * 2.2;
+    }
+    const settle = Math.exp(-dt * (firing ? 1.1 : 8));
+    this.kickPitch *= settle;
+    this.kickYaw *= settle;
+
+    p.cmd = {
+      seq: (p.cmd?.seq || 0) + 1,
+      btn,
+      yaw: this.aimYaw + this.kickYaw,
+      pitch: clamp(this.aimPitch + this.kickPitch, -1.3, 1.3),
+    };
   }
 
   seedOffset() {
@@ -319,12 +442,52 @@ export class Bot {
     return 22;
   }
 
+  /**
+   * Where the bot aims: centre mass on the target's position a fraction of a
+   * second ago. Aiming at the live position means no amount of strafing ever
+   * makes it miss, which is what reads as an aimbot.
+   */
   aimPointFor(target) {
     const h = target.state.height;
-    // Centre mass, only creeping upward a little at high skill. Bots that aim
-    // at the head land constant one-shot kills and read as aimbots.
-    const y = target.state.pos.y + h * (0.52 + 0.14 * this.skill.accuracy);
-    return { x: target.state.pos.x, y, z: target.state.pos.z };
+    const p = this.laggedPosition(target, this.room.time);
+    // Only creeping upward a little at high skill. Bots that aim at the head
+    // land constant one-shot kills.
+    return { x: p.x, y: p.y + h * (0.52 + 0.14 * this.skill.accuracy), z: p.z };
+  }
+
+  /** Where the target actually is, for visibility tests. */
+  truePointFor(target) {
+    const h = target.state.height;
+    return { x: target.state.pos.x, y: target.state.pos.y + h * 0.55, z: target.state.pos.z };
+  }
+
+  /**
+   * How much of the target the bot can actually see, 0..1, sampled at chest,
+   * head and both shoulders.
+   *
+   * A single ray to centre mass is far too generous: it threads railings, the
+   * gap under a balustrade and the corner of a doorway, so the bot opens up
+   * on a sliver of shoulder it should never have noticed — and from the other
+   * end that looks exactly like being shot through a wall.
+   */
+  exposure(from, target) {
+    const s = target.state;
+    const h = s.height;
+    // Shoulder offsets perpendicular to the line, so the samples straddle the
+    // body rather than lining up behind one another.
+    const dx = s.pos.x - from.x, dz = s.pos.z - from.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const px = -dz / len * 0.22, pz = dx / len * 0.22;
+
+    const points = [
+      { x: s.pos.x, y: s.pos.y + h * 0.55, z: s.pos.z },
+      { x: s.pos.x, y: s.pos.y + h * 0.88, z: s.pos.z },
+      { x: s.pos.x + px, y: s.pos.y + h * 0.72, z: s.pos.z + pz },
+      { x: s.pos.x - px, y: s.pos.y + h * 0.72, z: s.pos.z - pz },
+    ];
+    let seen = 0;
+    for (const q of points) if (this.canSee(from, q)) seen++;
+    return seen / points.length;
   }
 
   canShoot() {
@@ -333,14 +496,25 @@ export class Bot {
     if (!t || !t.alive) return false;
     if (this.blinded) return false;
     const eye = eyePosition(p.state);
+
+    // Half the target has to be showing. Anything less and it is a sliver
+    // through cover that a person would not have taken the shot on.
+    if (this.exposure(eye, t) < 0.5) return false;
+
+    // And the muzzle needs its own clearance — an eye above a wall with the
+    // barrel still behind it puts every round into the wall.
+    const muzzle = { x: eye.x, y: eye.y - 0.22, z: eye.z };
+    if (!this.canSee(muzzle, this.truePointFor(t))) return false;
+
     const aim = this.aimPointFor(t);
-    if (!this.canSee(eye, aim)) return false;
     const d = vnorm(vsub(aim, eye));
     const a = anglesFromDir(d);
     const off = Math.abs(angleDelta(this.aimYaw, a.yaw)) + Math.abs(this.aimPitch - a.pitch);
-    // The tolerance has to exceed the bot's own aim wobble, or a shaky bot
-    // would wait for an alignment it can never reach and simply never fire.
-    const tol = 0.05 + this.skill.error * (Math.PI / 180) * 1.8;
+    // The tolerance has to exceed the bot's own aim wobble or a shaky bot
+    // waits for an alignment it can never reach and never fires. It must not
+    // scale *with* the wobble either, though: that hands the sloppiest bots
+    // the widest licence to pull the trigger, which is backwards.
+    const tol = (4.0 + this.skill.error * 0.6) * (Math.PI / 180);
     return off < tol;
   }
 
@@ -363,7 +537,9 @@ export class Bot {
       if (room.time < q.spawnProtectUntil) continue;
       const d = vdist(p.state.pos, q.state.pos);
       if (d > this.skill.range) continue;
-      if (!this.canSee(eye, eyePosition(q.state))) continue;
+      // Same standard as taking the shot: a quarter of a body showing is not
+      // "spotted", it is a glimpse through a railing.
+      if (this.exposure(eye, q) < 0.5) continue;
 
       // Prefer close, and prefer whoever is already in front of us.
       const toward = Math.abs(angleDelta(this.aimYaw, Math.atan2(-(q.state.pos.x - p.state.pos.x), -(q.state.pos.z - p.state.pos.z))));

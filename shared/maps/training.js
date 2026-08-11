@@ -185,7 +185,10 @@ function shootHouse(b) {
 
   // Observation catwalk around two sides.
   b.slab(X0 - 2.4, Z0 - 2.4, X1 + 2.4, Z0, 5.6, 0.28, 'metal');
-  b.slab(X0 - 2.4, Z0, X0, Z1 + 2.4, 5.6, 0.28, 'metal');
+  // Cut back around the stair that climbs to it — solid, the deck's own
+  // underside blocked the top third of the flight.
+  b.slabHole(X0 - 2.4, Z0, X0, Z1 + 2.4, 5.6, 0.28, 'metal',
+    [X0 - 2.4, Z1 - 6.4, X0, Z1 + 2.4]);
   b.railing(X0 - 2.4, Z0 - 2.4, X1 + 2.4, Z0 - 2.4, 5.6, 'metal');
   b.railing(X0, Z0, X0, Z1 + 2.4, 5.6, 'metal');
   b.railing(X0 - 2.4, Z0 - 2.4, X0 - 2.4, Z1 + 2.4, 5.6, 'metal');
