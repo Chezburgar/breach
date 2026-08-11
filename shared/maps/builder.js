@@ -218,9 +218,12 @@ export class MapBuilder {
 
   /** Square column with a base and capital. */
   pillar(x, z, y0, y1, r, m, capM = null) {
-    this.ext(x - r, y0, z - r, x + r, y1, z + r, m);
+    // Capital and base stand a couple of centimetres proud of the shaft. Level
+    // with it, cap and shaft share a top plane and every column in the room
+    // flickers at its head.
+    this.ext(x - r, y0, z - r, x + r, y1 - 0.02, z + r, m);
     const c = capM || m;
-    this.ext(x - r * 1.28, y0, z - r * 1.28, x + r * 1.28, y0 + 0.22, z + r * 1.28, c);
+    this.ext(x - r * 1.28, y0 - 0.02, z - r * 1.28, x + r * 1.28, y0 + 0.22, z + r * 1.28, c);
     this.ext(x - r * 1.28, y1 - 0.22, z - r * 1.28, x + r * 1.28, y1, z + r * 1.28, c);
     return this;
   }
@@ -339,7 +342,10 @@ export function switchback(b, x0, z0, x1, z1, yBase, floorH, floors, mat, railMa
  */
 export function parapet(b, x0, z0, x1, z1, y, mat, h = 1.15, gaps = {}) {
   const t = 0.34;
-  const o = 0.25;
+  // The cornice must oversail the wall below it by an amount that matches no
+  // common wall thickness — flush with the masonry its outer face and the
+  // wall's are coplanar, and the whole eaves line flickers.
+  const o = 0.28;
   const y0 = y + 0.22, y1 = y + h;
 
   b.ext(x0 - o, y, z0 - o, x1 + o, y0, z0 + t, mat);
@@ -366,7 +372,9 @@ export function headhouse(b, x0, z0, x1, z1, y, h, mat, door = 'north') {
   b.wall(x0, z1, x1, z1, y, y + h, t, mat, door === 'south' ? gap : []);
   b.wall(x0, z0, x0, z1, y, y + h, t, mat, []);
   b.wall(x1, z0, x1, z1, y, y + h, t, mat, []);
-  b.slab(x0 - 0.25, z0 - 0.25, x1 + 0.25, z1 + 0.25, y + h, 0.3, mat);
+  // Proud of the walls: level with them the cap's top face and theirs are
+  // coplanar right round the hut and the roofline flickers.
+  b.slab(x0 - 0.28, z0 - 0.28, x1 + 0.28, z1 + 0.28, y + h + 0.06, 0.36, mat);
 }
 
 /** Locate a world position inside a named zone — used by the kill feed. */

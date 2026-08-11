@@ -132,10 +132,6 @@ export class Menu {
       list.appendChild(card);
     }
 
-    $('party-create').addEventListener('click', () => {
-      this.click();
-      this.onHost?.();
-    });
     $('party-join').addEventListener('click', () => {
       const code = $('party-code').value.trim().toUpperCase();
       if (!code) return this.click('error');
@@ -446,7 +442,7 @@ export class Menu {
     if (!group) { el.classList.add('hidden'); return; }
 
     const isLeader = group.leaderId === localId;
-    $('lobby-title').textContent = group.kind === 'party' ? 'PARTY' : 'PRIVATE MATCH';
+    $('lobby-title').textContent = 'PRIVATE MATCH';
     $('lobby-code').textContent = group.code;
 
     const members = $('lobby-members');
@@ -472,7 +468,7 @@ export class Menu {
     }
 
     const cfg = $('lobby-config');
-    if (group.kind === 'private') {
+    {
       cfg.innerHTML = `
         <h3>MODE</h3>
         <div class="chips" id="lobby-modes"></div>
@@ -503,10 +499,6 @@ export class Menu {
       }
       $('lobby-start').classList.toggle('hidden', !isLeader);
       $('lobby-start').textContent = 'START MATCH';
-    } else {
-      cfg.innerHTML = `<h3>PARTY</h3><p class="muted">Pick a mode from the play screen —
-        the whole party will be placed into the same match.</p>`;
-      $('lobby-start').classList.add('hidden');
     }
 
     el.classList.remove('hidden');

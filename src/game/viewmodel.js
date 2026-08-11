@@ -625,12 +625,13 @@ export class ViewModel {
     this.holder.position.copy(pos);
     this.holder.rotation.copy(rot);
 
-    // Magnified optics hand over to the picture-in-picture ocular, so the
-    // weapon is hidden — drawing it would put the scope body over the image you
-    // are looking through. Non-magnified sights stay visible: on a pistol or a
-    // red dot the gun *is* the sight picture, and hiding it looks broken.
-    // Sway is already zeroed at full ADS, which is what was pulling the
-    // receiver over the centre line before.
-    m.root.visible = !(m.magnification > 1.05 && this.adsBlend > 0.7);
+    // At full ADS the weapon is hidden and the sight picture stands on its
+    // own — drawing the gun puts the receiver and the optic body over the
+    // thing you are trying to look through. Sidearms are the exception: a
+    // pistol held at eye level *is* the sight picture, and hiding it looks
+    // broken. Sway is already zeroed at ADS, so nothing drifts over the
+    // centre line while it is up.
+    const sidearm = this.resolved?.cls === 'Sidearm';
+    m.root.visible = !(!sidearm && this.adsBlend > 0.7);
   }
 }

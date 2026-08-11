@@ -570,11 +570,6 @@ export class Session {
         this.pushLobby();
         return;
       }
-      case 'queue':
-      case 'unqueue':
-      case 'group.create':
-      case 'group.join':
-      case 'group.leave':
       case 'group.config':
       case 'group.start':
         // Lobby control belongs to the host alone.
@@ -618,7 +613,6 @@ export class Session {
         t: 'group',
         group: {
           code: this.code,
-          kind: 'private',
           leaderId: this.localClient.id,
           mode: this.pendingMode,
           map: DEFAULT_MAP,
