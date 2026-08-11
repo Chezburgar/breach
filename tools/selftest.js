@@ -6,7 +6,7 @@
 import { getMap, MAP_IDS } from '../shared/maps/index.js';
 import { buildWorld, cylinderBlocked, raycastWorld } from '../shared/collision.js';
 import { createPlayerState, stepPlayer } from '../shared/controller.js';
-import { FIXED_DT, PLAYER, BTN } from '../shared/constants.js';
+import { FIXED_DT, PLAYER, BTN, MOVE } from '../shared/constants.js';
 import { MODE_IDS, MODES } from '../shared/modes.js';
 import { WEAPON_LIST, resolveWeapon, recoilAt, currentSpread } from '../shared/weapons.js';
 import { GameRoom } from '../shared/sim/room.js';
@@ -17,6 +17,46 @@ const ok = (cond, label, detail = '') => {
   if (cond) console.log(`  PASS  ${label}`);
   else { failures++; console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`); }
 };
+
+/**
+ * Walk every flight of stairs in the map, up and down, driving the real
+ * controller. A flight that a player cannot climb — a riser above the step
+ * height, a landing that catches you, a nose that stops you dead — is the
+ * kind of fault that only shows up when someone tries to use it under fire.
+ *
+ * @returns {string[]} one line per broken flight
+ */
+function checkStairs(md, world) {
+  const bad = [];
+  for (const f of md.flights || []) {
+    const fx = -Math.sin(f.yaw), fz = -Math.cos(f.yaw);
+    const len = f.steps * f.run;
+    const top = { x: f.x + fx * (len + 1.0), y: f.y + f.steps * f.rise, z: f.z + fz * (len + 1.0) };
+    const bottom = { x: f.x - fx * 1.0, y: f.y, z: f.z - fz * 1.0 };
+
+    for (const [from, to, dir] of [[bottom, top, 'up'], [top, bottom, 'down']]) {
+      const s = createPlayerState({ p: [from.x, from.y + 0.6, from.z], yaw: 0 });
+      let best = Infinity;
+      let arrived = false;
+      // Generous budget: a flight is short, but the controller has to
+      // accelerate, and stairs are climbed at a walk.
+      const budget = Math.ceil(((len + 3) / MOVE.walkSpeed / FIXED_DT) * 3) + 240;
+      for (let i = 0; i < budget; i++) {
+        const dx = to.x - s.pos.x, dz = to.z - s.pos.z;
+        const flat = Math.hypot(dx, dz);
+        best = Math.min(best, flat);
+        if (flat < 1.6 && Math.abs(s.pos.y - to.y) < 1.4) { arrived = true; break; }
+        const yaw = Math.atan2(-dx, -dz);
+        stepPlayer(s, { btn: BTN.FORWARD, yaw, pitch: 0 }, world, FIXED_DT);
+      }
+      if (!arrived) {
+        bad.push(`${dir} at (${f.x.toFixed(0)}, ${f.y.toFixed(1)}, ${f.z.toFixed(0)}) ` +
+          `rise ${f.rise.toFixed(2)} — stalled ${best.toFixed(1)}m short`);
+      }
+    }
+  }
+  return bad;
+}
 
 /**
  * Pairs of boxes whose faces land on the same plane where a player can see
@@ -153,6 +193,11 @@ function checkMaps() {
         `${comps.length} components (largest ${comps[0]} of ${graph.nodes.length})`);
       ok(orphans === 0, `${id}: no isolated nav nodes`, `${orphans} orphans`);
     }
+
+    const stairFaults = checkStairs(md, world);
+    ok(stairFaults.length === 0, `${id}: every flight of stairs is climbable`,
+      `${stairFaults.length}/${(md.flights || []).length * 2} runs failed:\n        `
+        + stairFaults.join('\n        '));
 
     const zf = coincidentFaces(md);
     ok(zf.length === 0, `${id}: no surfaces fighting for the same plane`,

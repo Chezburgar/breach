@@ -7,7 +7,7 @@ import {
 } from '/shared/weapons.js';
 import { DEFAULT_BANNER, DEFAULT_FANFARE, levelFromXp, xpForLevel, randomName, sanitizeName } from '/shared/cosmetics.js';
 import { QUALITY_PRESETS } from '../engine/renderer.js';
-import { allBanners, drawBanner } from './banners.js';
+import { allBanners, drawBanner, bannerFromFile, registerBanner } from './banners.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'breach.profile.v1';
@@ -18,6 +18,9 @@ export function loadProfile() {
   const profile = {
     name: sanitizeName(saved.name) || randomName(),
     banner: saved.banner || DEFAULT_BANNER,
+    // The player's own artwork, kept with the profile so it survives a reload
+    // and can be handed to everyone else when they join a match.
+    uploadedBanner: saved.uploadedBanner || null,
     fanfare: saved.fanfare || DEFAULT_FANFARE,
     xp: Number.isFinite(saved.xp) ? saved.xp : 0,
     loadout: sanitizeLoadout(saved.loadout),
@@ -44,6 +47,7 @@ export function saveProfile(p) {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       name: p.name, banner: p.banner, fanfare: p.fanfare, xp: p.xp,
       loadout: p.loadout, settings: p.settings,
+      uploadedBanner: p.uploadedBanner || null,
     }));
   } catch { /* storage disabled — the session still works */ }
 }
@@ -281,6 +285,30 @@ export class Menu {
       this.refreshChip();
       this.onProfileChange?.();
     });
+
+    const upload = $('banner-upload');
+    const picker = $('banner-file');
+    upload.onclick = () => { this.click(); picker.value = ''; picker.click(); };
+    picker.onchange = async () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      try {
+        const def = await bannerFromFile(file);
+        await registerBanner(def);
+        // Keep one upload at a time — the artwork travels to every other
+        // player in the lobby, and a gallery of them is a lot to push down a
+        // data channel for a picture only one person is wearing.
+        this.profile.uploadedBanner = def;
+        this.profile.banner = def.id;
+        saveProfile(this.profile);
+        this.buildProfileTab();
+        this.refreshChip();
+        this.onProfileChange?.();
+        this.toast(`Banner "${def.name}" uploaded.`);
+      } catch (err) {
+        this.toast(err.message || 'Could not use that image.', true);
+      }
+    };
 
     const grid = $('banner-grid');
     grid.innerHTML = '';

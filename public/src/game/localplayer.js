@@ -404,9 +404,25 @@ export class LocalPlayer {
     }
     const leanFrac = MOVE.leanOffset > 1e-6 ? offset / MOVE.leanOffset : 0;
 
+    // Step smoothing. The controller lifts the body onto a stair riser in a
+    // single tick — correct for collision, but carried straight to the eye it
+    // is a 20 cm jolt, five times a second, all the way up a flight. Hold the
+    // camera back by however much the body just jumped and let it catch up.
+    // Only genuine steps qualify: anything taller than the controller's own
+    // step height is a fall or a launch and should be felt.
+    const bodyY = this.state.pos.y;
+    if (this._stepPrevY !== undefined) {
+      const dy = bodyY - this._stepPrevY;
+      if (this.state.onGround && Math.abs(dy) > 0.008 && Math.abs(dy) <= PLAYER.stepHeight + 0.02) {
+        this.stepLag = clamp((this.stepLag || 0) + dy, -PLAYER.stepHeight, PLAYER.stepHeight);
+      }
+    }
+    this._stepPrevY = bodyY;
+    this.stepLag = damp(this.stepLag || 0, 0, 15, dt);
+
     camera.position.set(
       eye.x + this.correction.x + right.x * offset + this.viewBob.x,
-      eye.y + this.correction.y - this.landDip * 0.16 + this.viewBob.y,
+      eye.y + this.correction.y - this.stepLag - this.landDip * 0.16 + this.viewBob.y,
       eye.z + this.correction.z + right.z * offset
     );
 

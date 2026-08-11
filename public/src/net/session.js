@@ -450,6 +450,9 @@ export class Session {
       this.emit(msg.t, msg);
     });
     this.applyProfileTo(this.localClient, this.profile);
+    // The host's own upload has to be on the client record too, or guests
+    // joining later are never told about it.
+    this.localClient.bannerArt = this.myBannerArt();
     this.clients.set(this.peer.id, this.localClient);
 
     this.peer.on('connection', (conn) => this.onGuest(conn));
@@ -502,6 +505,12 @@ export class Session {
     client.loadout = sanitizeLoadout(profile.loadout);
   }
 
+  /** Our own uploaded artwork, if that is the banner we are actually wearing. */
+  myBannerArt() {
+    const art = this.profile.uploadedBanner;
+    return art && art.id === this.profile.banner ? art : null;
+  }
+
   helloFor(client) {
     return {
       t: 'hello',
@@ -549,6 +558,10 @@ export class Session {
       conn.on('error', drop);
 
       client.deliver(this.helloFor(client));
+      // Catch the newcomer up on everyone's uploaded banners.
+      for (const c of this.clients.values()) {
+        if (c.bannerArt) client.deliver({ t: 'bannerart', ...c.bannerArt });
+      }
       this.pushLobby();
 
       // Someone joining a match already underway is folded straight into it.
@@ -566,6 +579,13 @@ export class Session {
           name: msg.name, banner: msg.banner, fanfare: msg.fanfare,
           level: msg.level, loadout: msg.loadout,
         });
+        // Uploaded artwork is relayed once, on its own, rather than riding
+        // along with every roster update — it is a picture, and the roster
+        // goes out on every profile change, kill and round start.
+        if (msg.bannerArt?.id && msg.bannerArt.image) {
+          client.bannerArt = msg.bannerArt;
+          this.broadcastAll({ t: 'bannerart', ...msg.bannerArt });
+        }
         if (client.room) client.room.onProfileChanged(client);
         this.pushLobby();
         return;
@@ -737,6 +757,7 @@ export class Session {
       fanfare: this.profile.fanfare,
       level: this.profile.level,
       loadout: this.profile.loadout,
+      bannerArt: this.myBannerArt(),
     });
   }
 

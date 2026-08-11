@@ -45,36 +45,12 @@ export const RARITY_COLORS = {
   legendary: '#ffc24a',
 };
 
-/** Synthesised fanfares, used until real audio files are dropped in. */
-export const BUILTIN_FANFARES = [
-  {
-    id: 'fanfare_valiant', name: 'Valiant', builtin: true,
-    notes: [[0, 'G4', 0.18], [0.18, 'C5', 0.18], [0.36, 'E5', 0.28], [0.68, 'D5', 0.16],
-            [0.86, 'E5', 0.16], [1.04, 'G5', 0.9], [1.04, 'C5', 0.9], [1.04, 'E5', 0.9]],
-  },
-  {
-    id: 'fanfare_ironclad', name: 'Ironclad', builtin: true,
-    notes: [[0, 'C4', 0.26], [0.28, 'C4', 0.14], [0.44, 'G4', 0.34], [0.8, 'F4', 0.2],
-            [1.02, 'D#4', 0.85], [1.02, 'G4', 0.85], [1.02, 'C5', 0.85]],
-  },
-  {
-    id: 'fanfare_ascend', name: 'Ascend', builtin: true,
-    notes: [[0, 'D4', 0.13], [0.13, 'F#4', 0.13], [0.26, 'A4', 0.13], [0.39, 'D5', 0.13],
-            [0.52, 'F#5', 0.18], [0.72, 'A5', 0.95], [0.72, 'D5', 0.95]],
-  },
-  {
-    id: 'fanfare_sovereign', name: 'Sovereign', builtin: true,
-    notes: [[0, 'A3', 0.3], [0.32, 'E4', 0.3], [0.64, 'A4', 0.22], [0.88, 'B4', 0.22],
-            [1.12, 'C#5', 1.1], [1.12, 'E5', 1.1], [1.12, 'A4', 1.1]],
-  },
-  {
-    id: 'fanfare_pulse', name: 'Pulse', builtin: true,
-    notes: [[0, 'E4', 0.1], [0.12, 'E4', 0.1], [0.24, 'B4', 0.1], [0.36, 'E5', 0.1],
-            [0.48, 'G5', 0.14], [0.64, 'F#5', 0.14], [0.8, 'E5', 1.0], [0.8, 'B4', 1.0]],
-  },
-];
+// Fanfares are real audio files listed in /assets/fanfares/manifest.json.
+// There is no synthesised fallback set — a placeholder chiptune played over
+// somebody’s elimination banner is worse than silence.
+export const BUILTIN_FANFARES = [];
 
-export const DEFAULT_FANFARE = 'fanfare_valiant';
+export const DEFAULT_FANFARE = 'ff_charge';
 
 const NAMES_A = ['Iron', 'Silent', 'Grim', 'Red', 'Cold', 'Wired', 'Rogue', 'Steel', 'Ghost', 'Blunt', 'Swift', 'Dead'];
 const NAMES_B = ['Wolf', 'Fox', 'Vector', 'Sparrow', 'Anvil', 'Ember', 'Cipher', 'Reaper', 'Vandal', 'Kite', 'Nomad', 'Crow'];

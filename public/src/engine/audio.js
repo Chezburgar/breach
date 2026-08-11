@@ -1,23 +1,8 @@
 // Audio.
 //
-// Everything is synthesised at runtime — gunshots, impacts, footsteps, UI —
-// so the game has a full soundscape with no downloads. Victory fanfares can
-// either be synthesised from note lists or loaded from real audio files
-// dropped into /assets/fanfares.
-
-import { BUILTIN_FANFARES } from '/shared/cosmetics.js';
-
-const NOTE_BASE = { C: -9, D: -7, E: -5, F: -4, G: -2, A: 0, B: 2 };
-
-function noteToFreq(name) {
-  const m = /^([A-G])([#b]?)(-?\d)$/.exec(name);
-  if (!m) return 440;
-  let semis = NOTE_BASE[m[1]];
-  if (m[2] === '#') semis += 1;
-  if (m[2] === 'b') semis -= 1;
-  const octave = parseInt(m[3], 10);
-  return 440 * Math.pow(2, (semis + (octave - 4) * 12) / 12);
-}
+// Weapons, impacts, footsteps and UI are synthesised at runtime, so the game
+// has a full soundscape with no downloads. Music and victory fanfares are real
+// audio files from /assets.
 
 export class AudioEngine {
   constructor() {
@@ -65,6 +50,17 @@ export class AudioEngine {
     this.ui.connect(this.master);
 
     this.noise = this.makeNoiseBuffer(2.0);
+
+    // One shared reverb for the whole scene. Gunfire without reflections
+    // sounds like a firework in a vacuum, but a convolver per shot at 800 rpm
+    // is not affordable — every shot sends into this instead.
+    this.verb = this.ctx.createConvolver();
+    this.verb.buffer = this.makeImpulse(1.3, 3.0);
+    this.verbOut = this.ctx.createGain();
+    this.verbOut.gain.value = 0.85;
+    this.verb.connect(this.verbOut);
+    this.verbOut.connect(this.limiter);
+
     this.ready = true;
     await this.loadFanfareManifest();
   }
@@ -114,6 +110,20 @@ export class AudioEngine {
     return { gain, pan, lowpass, delay: dist / 340 };
   }
 
+  /** Feed a source into the shared reverb at `amount`, panned to match. */
+  sendVerb(node, amount, sp) {
+    if (!this.verb || amount <= 0.001) return;
+    const g = this.ctx.createGain();
+    g.gain.value = amount;
+    if (sp) {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.value = sp.pan * 0.6;   // reflections arrive less directional
+      node.connect(g); g.connect(panner); panner.connect(this.verb);
+    } else {
+      node.connect(g); g.connect(this.verb);
+    }
+  }
+
   route(node, opts) {
     const bus = opts.bus === 'ui' ? this.ui : (opts.bus === 'music' ? this.music : this.sfx);
     if (opts.spatial) {
@@ -134,110 +144,152 @@ export class AudioEngine {
 
   // ------------------------------------------------------------ weapons
   /**
-   * Layered gunshot: a transient crack, a filtered noise body, and a low thump.
-   * The weapon class shifts the balance so an SMG and a DMR read differently.
+   * A gunshot is not one sound, it is four arriving in order:
+   *
+   *   0 ms    the muzzle blast — broadband, brutally short, all attack
+   *   2 ms    the body, a resonance sweeping from a crack down into a thump
+   *  12 ms    the action cycling, which is what makes it read as machinery
+   *  30 ms+   reflections off everything around you
+   *
+   * Distance rearranges them. Up close you get the crack; at a hundred metres
+   * the high end is gone and what reaches you is the thump and a long tail,
+   * which is why distant fire sounds like a door slamming in another room.
    */
   gunshot(weapon, pos, opts = {}) {
     if (!this.ready) return;
-    const sp = pos ? this.spatial(pos, 10, 190) : null;
+    const sp = pos ? this.spatial(pos, 10, 220) : null;
     if (pos && !sp) return;
     const t = this.ctx.currentTime + (sp?.delay ?? 0);
 
     const cls = weapon?.cls || 'Assault Rifle';
     const suppressed = opts.suppressed;
+
+    // `tone` is where the body resonance starts before it sweeps down; `dur`
+    // is how long that sweep takes. Big slow cartridges start lower and take
+    // longer, which is the whole difference between a .45 and a 5.7.
     const profile = {
-      'Assault Rifle': { crack: 1.0, body: 0.9, thump: 0.8, dur: 0.20, tone: 1700 },
-      SMG: { crack: 0.85, body: 0.7, thump: 0.5, dur: 0.15, tone: 2300 },
-      LMG: { crack: 1.1, body: 1.1, thump: 1.1, dur: 0.26, tone: 1400 },
-      'Marksman Rifle': { crack: 1.3, body: 1.2, thump: 1.2, dur: 0.34, tone: 1200 },
-      Shotgun: { crack: 1.15, body: 1.4, thump: 1.3, dur: 0.32, tone: 900 },
-      Sidearm: { crack: 0.8, body: 0.6, thump: 0.5, dur: 0.16, tone: 2000 },
-    }[cls] || { crack: 1, body: 1, thump: 0.8, dur: 0.2, tone: 1700 };
+      'Assault Rifle': { crack: 1.00, body: 0.95, thump: 0.85, dur: 0.115, tone: 2100, sub: 62 },
+      SMG: { crack: 0.80, body: 0.68, thump: 0.50, dur: 0.075, tone: 2900, sub: 78 },
+      LMG: { crack: 1.10, body: 1.15, thump: 1.15, dur: 0.150, tone: 1750, sub: 52 },
+      'Marksman Rifle': { crack: 1.35, body: 1.25, thump: 1.20, dur: 0.185, tone: 1500, sub: 46 },
+      Shotgun: { crack: 1.15, body: 1.45, thump: 1.35, dur: 0.210, tone: 1150, sub: 42 },
+      Sidearm: { crack: 0.82, body: 0.62, thump: 0.55, dur: 0.085, tone: 2500, sub: 72 },
+    }[cls] || { crack: 1, body: 1, thump: 0.85, dur: 0.115, tone: 2100, sub: 62 };
 
-    const level = (opts.gain ?? 1) * (suppressed ? 0.42 : 1);
+    const level = (opts.gain ?? 1) * (suppressed ? 0.38 : 1);
+    const dist = sp ? Math.max(0, (1 / Math.max(sp.gain, 1e-3) - 1) * 11.8) : 0;
+    // Air eats the top end first. Past ~60 m there is no crack left at all.
+    const near = Math.max(0, 1 - dist / 60);
+    const vary = 0.94 + Math.random() * 0.12;
 
-    // Body: filtered noise burst.
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.noise;
-    src.playbackRate.value = 0.85 + Math.random() * 0.3;
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = suppressed ? 'lowpass' : 'bandpass';
-    bp.frequency.value = suppressed ? 900 : profile.tone;
-    bp.Q.value = suppressed ? 1 : 0.8;
-    const env = this.ctx.createGain();
-    env.gain.setValueAtTime(0.0001, t);
-    env.gain.exponentialRampToValueAtTime(0.9 * profile.body * level, t + 0.004);
-    env.gain.exponentialRampToValueAtTime(0.0001, t + profile.dur);
-    src.connect(bp); bp.connect(env);
-    this.route(env, { spatial: sp, gain: 0.55 });
-    src.start(t); src.stop(t + profile.dur + 0.05);
-
-    // Crack: short high transient.
+    // --- muzzle blast: 3 ms of broadband, no envelope to speak of ---------
     if (!suppressed) {
       const c = this.ctx.createBufferSource();
       c.buffer = this.noise;
-      c.playbackRate.value = 2.2;
+      c.playbackRate.value = 2.6 * vary;
       const hp = this.ctx.createBiquadFilter();
       hp.type = 'highpass';
-      hp.frequency.value = 2600;
+      hp.frequency.value = 1800 + near * 1400;
       const ce = this.ctx.createGain();
-      ce.gain.setValueAtTime(0.9 * profile.crack * level, t);
-      ce.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+      ce.gain.setValueAtTime(1.15 * profile.crack * level * (0.25 + near * 0.75), t);
+      ce.gain.exponentialRampToValueAtTime(0.0001, t + 0.028);
       c.connect(hp); hp.connect(ce);
       this.route(ce, { spatial: sp, gain: 0.5 });
-      c.start(t); c.stop(t + 0.08);
+      c.start(t); c.stop(t + 0.05);
     }
 
-    // Thump: the low end you feel more than hear.
+    // --- body: a resonance swept from crack down to thump -----------------
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.playbackRate.value = vary;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.Q.value = suppressed ? 0.8 : 3.6;
+    const top = suppressed ? 700 : profile.tone * (0.35 + near * 0.65);
+    lp.frequency.setValueAtTime(top, t);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(140, profile.sub * 3.4), t + profile.dur);
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(1.05 * profile.body * level, t + 0.0035);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + profile.dur * 2.2);
+    src.connect(lp); lp.connect(env);
+    this.route(env, { spatial: sp, gain: 0.6 });
+    // Distant shots are mostly what the room gives back, not the shot itself.
+    this.sendVerb(env, (suppressed ? 0.1 : 0.5) * (0.35 + (1 - near) * 0.9), sp);
+    src.start(t); src.stop(t + profile.dur * 2.4 + 0.05);
+
+    // --- sub: the punch you feel rather than hear -------------------------
     const osc = this.ctx.createOscillator();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(150, t);
-    osc.frequency.exponentialRampToValueAtTime(48, t + 0.12);
+    osc.frequency.setValueAtTime(profile.sub * 2.6, t);
+    osc.frequency.exponentialRampToValueAtTime(profile.sub, t + 0.09);
     const oe = this.ctx.createGain();
-    oe.gain.setValueAtTime(0.7 * profile.thump * level, t);
-    oe.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    oe.gain.setValueAtTime(0.85 * profile.thump * level, t);
+    oe.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
     osc.connect(oe);
-    this.route(oe, { spatial: sp, gain: 0.5 });
-    osc.start(t); osc.stop(t + 0.2);
+    this.route(oe, { spatial: sp, gain: 0.55 });
+    osc.start(t); osc.stop(t + 0.22);
 
-    this.action(t, sp, level);
+    // --- action ------------------------------------------------------------
+    this.action(t, sp, level * (0.35 + near * 0.65), cls);
+  }
 
-    // Tail: a short slap-back so shots sit in the space.
-    if (!suppressed && (!sp || sp.gain > 0.2)) {
-      const tail = this.ctx.createBufferSource();
-      tail.buffer = this.noise;
-      tail.playbackRate.value = 0.5;
-      const tf = this.ctx.createBiquadFilter();
-      tf.type = 'lowpass'; tf.frequency.value = 1100;
-      const te = this.ctx.createGain();
-      te.gain.setValueAtTime(0.0001, t + 0.03);
-      te.gain.exponentialRampToValueAtTime(0.17 * level, t + 0.06);
-      te.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
-      tail.connect(tf); tf.connect(te);
-      this.route(te, { spatial: sp, gain: 0.4 });
-      tail.start(t + 0.03); tail.stop(t + 0.7);
+  /**
+   * Mechanical action noise layered over a shot. Two events, not one: the
+   * bolt going back and the bolt coming home, a few milliseconds apart. It is
+   * a large part of why a real gun sounds like machinery rather than a bang.
+   */
+  action(t, sp, level, cls = 'Assault Rifle') {
+    if (level < 0.02) return;
+    const heavy = cls === 'LMG' || cls === 'Shotgun' || cls === 'Marksman Rifle';
+    for (const [at, freq, gain, len] of [
+      [0.010, heavy ? 2600 : 3400, 0.20, 0.045],
+      [heavy ? 0.042 : 0.028, heavy ? 1900 : 2600, 0.14, 0.055],
+    ]) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.playbackRate.value = 2.6 + Math.random() * 0.8;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = freq * (0.9 + Math.random() * 0.2);
+      bp.Q.value = 4;
+      const env = this.ctx.createGain();
+      env.gain.setValueAtTime(0.0001, t + at);
+      env.gain.exponentialRampToValueAtTime(gain * level, t + at + 0.006);
+      env.gain.exponentialRampToValueAtTime(0.0001, t + at + len);
+      src.connect(bp); bp.connect(env);
+      this.route(env, { spatial: sp, gain: 0.5 });
+      src.start(t + at); src.stop(t + at + len + 0.03);
     }
   }
 
   /**
-   * Mechanical action noise layered over a shot — the bolt cycling is a large
-   * part of why a real gun sounds like machinery rather than a firework.
+   * A round going past your head. Supersonic rounds arrive before their own
+   * report, so this is the first thing you hear when someone misses you — and
+   * the single strongest cue that you are being shot at.
    */
-  action(t, sp, level) {
+  crackBy(distance = 1.5) {
+    if (!this.ready) return;
+    const t = this.ctx.currentTime;
+    const close = Math.max(0, 1 - distance / 4);
     const src = this.ctx.createBufferSource();
     src.buffer = this.noise;
-    src.playbackRate.value = 3.0;
+    src.playbackRate.value = 3.2;
     const bp = this.ctx.createBiquadFilter();
     bp.type = 'bandpass';
-    bp.frequency.value = 3400;
-    bp.Q.value = 3;
+    bp.frequency.setValueAtTime(5200, t);
+    bp.frequency.exponentialRampToValueAtTime(1200, t + 0.05);
+    bp.Q.value = 1.2;
     const env = this.ctx.createGain();
-    env.gain.setValueAtTime(0.0001, t + 0.012);
-    env.gain.exponentialRampToValueAtTime(0.22 * level, t + 0.022);
-    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.075);
-    src.connect(bp); bp.connect(env);
-    this.route(env, { spatial: sp, gain: 0.5 });
-    src.start(t + 0.012); src.stop(t + 0.1);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(0.5 * (0.25 + close), t + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    const pan = this.ctx.createStereoPanner();
+    pan.pan.value = (Math.random() * 2 - 1) * 0.5;
+    src.connect(bp); bp.connect(env); env.connect(pan);
+    this.route(pan, { gain: 0.55 });
+    this.sendVerb(env, 0.25, null);
+    src.start(t); src.stop(t + 0.09);
   }
 
   explosion(pos) {
@@ -576,17 +628,63 @@ export class AudioEngine {
   }
 
   fanfareList() {
-    return [...this.fanfareFiles, ...BUILTIN_FANFARES.map((f) => ({ id: f.id, name: f.name, builtin: true }))];
+    return [...this.fanfareFiles];
   }
 
   async loadBuffer(url) {
     if (this.buffers.has(url)) return this.buffers.get(url);
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`fanfare ${url} missing`);
+    if (!res.ok) throw new Error(`audio ${url} missing`);
     const raw = await res.arrayBuffer();
     const buf = await this.ctx.decodeAudioData(raw);
     this.buffers.set(url, buf);
     return buf;
+  }
+
+  // ------------------------------------------------------- menu music
+  /**
+   * Loop the menu track. Called on every audio unlock and whenever the player
+   * comes back to the menu; it is a no-op if the track is already running.
+   */
+  async startMenuMusic() {
+    if (!this.ready || this.menuMusic) return;
+    this.menuMusic = { stopped: false };   // claim the slot before awaiting
+    try {
+      const url = new URL('../../assets/music/deadzone.mp3', import.meta.url).href;
+      const buf = await this.loadBuffer(url);
+      if (this.menuMusic.stopped) { this.menuMusic = null; return; }
+
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const gain = this.ctx.createGain();
+      // Fade in — the track snapping to full volume the instant you click is
+      // startling when the menu has been silent.
+      gain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.55, this.ctx.currentTime + 1.4);
+      src.connect(gain); gain.connect(this.music);
+      src.start();
+      this.menuMusic = { src, gain, stopped: false };
+    } catch (err) {
+      this.menuMusic = null;
+      console.warn('menu music unavailable', err);
+    }
+  }
+
+  /** Duck the menu track out. Called when a match starts. */
+  stopMenuMusic(fade = 0.8) {
+    const m = this.menuMusic;
+    if (!m) return;
+    this.menuMusic = null;
+    m.stopped = true;
+    if (!m.src) return;
+    const t = this.ctx.currentTime;
+    try {
+      m.gain.gain.cancelScheduledValues(t);
+      m.gain.gain.setValueAtTime(Math.max(0.0001, m.gain.gain.value), t);
+      m.gain.gain.exponentialRampToValueAtTime(0.0001, t + fade);
+      m.src.stop(t + fade + 0.05);
+    } catch { /* already stopped */ }
   }
 
   /** Play a victory fanfare — a real audio file if one exists, else synth. */
@@ -612,55 +710,8 @@ export class AudioEngine {
         // Fall through to the synthesised version.
       }
     }
-    const def = BUILTIN_FANFARES.find((f) => f.id === id) || BUILTIN_FANFARES[0];
-    return this.synthFanfare(def);
-  }
-
-  /** @returns {number} seconds until the last note has decayed. */
-  synthFanfare(def) {
-    const t0 = this.ctx.currentTime + 0.05;
-    const bus = this.ctx.createGain();
-    bus.gain.value = 0.5;
-    bus.connect(this.music);
-
-    // A little hall so it does not sound like a phone ringtone.
-    const conv = this.ctx.createConvolver();
-    conv.buffer = this.makeImpulse(1.8, 2.6);
-    const wet = this.ctx.createGain();
-    wet.gain.value = 0.32;
-    conv.connect(wet); wet.connect(this.music);
-
-    for (const [at, note, dur] of def.notes) {
-      const f = noteToFreq(note);
-      for (const [mul, level, type] of [[1, 0.5, 'sawtooth'], [2, 0.16, 'triangle'], [0.5, 0.22, 'sine']]) {
-        const o = this.ctx.createOscillator();
-        o.type = type;
-        o.frequency.value = f * mul;
-        const g = this.ctx.createGain();
-        const s = t0 + at;
-        g.gain.setValueAtTime(0.0001, s);
-        g.gain.exponentialRampToValueAtTime(level, s + 0.02);
-        g.gain.setValueAtTime(level, s + dur * 0.55);
-        g.gain.exponentialRampToValueAtTime(0.0001, s + dur + 0.22);
-        o.connect(g); g.connect(bus); g.connect(conv);
-        o.start(s); o.stop(s + dur + 0.3);
-      }
-    }
-
-    // A timpani-ish hit on the downbeat.
-    const th = this.ctx.createOscillator();
-    th.type = 'sine';
-    th.frequency.setValueAtTime(120, t0);
-    th.frequency.exponentialRampToValueAtTime(52, t0 + 0.4);
-    const tg = this.ctx.createGain();
-    tg.gain.setValueAtTime(0.5, t0);
-    tg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.6);
-    th.connect(tg); tg.connect(bus);
-    th.start(t0); th.stop(t0 + 0.7);
-
-    let end = 0.7;
-    for (const [at, , dur] of def.notes) end = Math.max(end, at + dur + 0.3);
-    return end + 0.05;
+    // No file, no fanfare. There is no synthesised stand-in any more.
+    return 0;
   }
 
   makeImpulse(seconds, decay) {

@@ -6,7 +6,7 @@ import { Session } from './net/session.js';
 import { Game } from './game/game.js';
 import { HUD } from './ui/hud.js';
 import { Menu, loadProfile, saveProfile } from './ui/menu.js';
-import { loadBannerManifest } from './ui/banners.js';
+import { loadBannerManifest, registerBanner } from './ui/banners.js';
 
 const boot = document.getElementById('boot');
 const bootFill = document.getElementById('boot-fill');
@@ -29,6 +29,8 @@ async function main() {
 
   await progress(0.12, 'loading cosmetics');
   await loadBannerManifest();
+  // The player's own upload, restored from their profile.
+  if (profile.uploadedBanner) await registerBanner(profile.uploadedBanner);
 
   await progress(0.2, 'starting renderer');
   const audio = new AudioEngine();
@@ -110,14 +112,7 @@ async function main() {
     },
     onAutoQuality: (on) => { game.renderer.autoQuality = on; },
     onProfileChange: () => {
-      net.send({
-        t: 'profile',
-        name: profile.name,
-        banner: profile.banner,
-        fanfare: profile.fanfare,
-        level: profile.level,
-        loadout: profile.loadout,
-      });
+      net.sendProfile();
       if (game.inMatch && game.local) {
         net.send({ t: 'loadout', loadout: profile.loadout });
       }
@@ -137,6 +132,11 @@ async function main() {
     menu.setOnline(msg.online);
     menu.renderFanfares();
   });
+
+  // Somebody else's uploaded banner. Registering it by id is all that is
+  // needed — every message that names a banner already resolves through the
+  // same lookup, so the intro, kill feed and scoreboard pick it up for free.
+  net.on('bannerart', (msg) => registerBanner(msg));
 
   // Public matchmaking sends a waiting-room roster; a private match sends a
   // lobby with a code. They are deliberately different screens.
@@ -169,6 +169,7 @@ async function main() {
   const unlock = async () => {
     await audio.unlock();
     menu.renderFanfares();
+    if (!game.inMatch) audio.startMenuMusic();
   };
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });

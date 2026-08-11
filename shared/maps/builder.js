@@ -17,6 +17,7 @@ export class MapBuilder {
     this.zones = [];
     this.nav = [];
     this.decals = [];
+    this.flights = [];
   }
 
   // --- Primitives -------------------------------------------------------
@@ -183,6 +184,9 @@ export class MapBuilder {
    */
   stairs(x, y, z, yaw, steps, rise, run, width, m, opts = {}) {
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    // Recorded so the harness can walk every flight in the map and prove a
+    // player can actually get up it.
+    this.flights.push({ x, y, z, yaw, steps, rise, run, width });
     for (let i = 0; i < steps; i++) {
       const d = (i + 0.5) * run;
       // Each step is a solid block down to the landing below: no floating treads,
@@ -294,6 +298,7 @@ export class MapBuilder {
       zones: this.zones,
       nav: this.nav,
       decals: this.decals,
+      flights: this.flights,
     };
   }
 }

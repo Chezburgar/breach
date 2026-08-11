@@ -213,7 +213,10 @@ function frontCourt(b) {
     b.ext(-30, 0, z0, -9, h, z1, 'stone');
     b.ext(9, 0, z0, 30, h, z1, 'stone');
   }
-  b.stairs(0, 0, -30.4, Math.PI, 4, 0.3, 0.55, 18, 'stone');
+  // The flight lands *against* the terrace face, not inside it. Started at
+  // -30.4 its four treads were buried in the 1.2 m deck and the front of the
+  // terrace was a wall you could only stare at.
+  b.stairs(0, 0, -32.2, Math.PI, 4, 0.3, 0.55, 18, 'stone');
   b.railing(-30, -30, -9.5, -30, 1.2, 'stone', 1.05);
   b.railing(9.5, -30, 30, -30, 1.2, 'stone', 1.05);
 
@@ -302,14 +305,22 @@ function manor(b) {
   b.railing(-13, 10, 13, 10, F1, 'wood', 1.05);
 
   // Grand stair: a wide flight up to a half landing, then two returns.
+  // Twelve treads of 0.34 carry the flight from z 8.6 to z 4.52, so that is
+  // where the half landing has to start. Sitting it at 6.0 put its underside
+  // across the flight at head height: you climbed five steps into a ceiling.
   b.stairs(0, 0, 8.6, 0, 12, F1 / 2 / 12, 0.34, 7.0, 'marble');
   // The flight's top tread runs under this landing, so the landing is laid a
   // centimetre and a half proud — level with it the two top faces flicker.
-  b.slab(-3.6, 3.9, 3.6, 6.0, F1 / 2 + 0.015, 0.415, 'marble');
-  b.stairs(-5.6, F1 / 2, 6.0, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
-  b.stairs(5.6, F1 / 2, 6.0, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
-  b.railing(-3.6, 3.9, -3.6, 6.0, F1 / 2, 'wood');
-  b.railing(3.6, 3.9, 3.6, 6.0, F1 / 2, 'wood');
+  // Wide enough to carry both returns as well as the flight — at 3.6 either
+  // side of centre the returns started over thin air.
+  b.slab(-7.4, 2.6, 7.4, 4.52, F1 / 2 + 0.015, 0.415, 'marble');
+  // The returns leave the landing and climb back the way you came, either
+  // side of the main flight, arriving on the gallery at z 8.6.
+  b.stairs(-5.6, F1 / 2, 4.52, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
+  b.stairs(5.6, F1 / 2, 4.52, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
+  b.railing(-7.4, 2.6, -7.4, 4.52, F1 / 2, 'wood');
+  b.railing(7.4, 2.6, 7.4, 4.52, F1 / 2, 'wood');
+  b.railing(-7.4, 2.6, 7.4, 2.6, F1 / 2, 'wood');
 
   // Service stairs, west and east, all the way to the attic.
   switchback(b, MX0 + 1.4, -20, MX0 + 8.4, -13, 0, F1, 3, 'wood');
@@ -330,7 +341,11 @@ function manor(b) {
 
   // Library shelving — dense cover with gaps to peek through. Kept clear of
   // the z = -12 doorway so the room keeps both its entrances.
-  for (const z of [-22, -17, -6, 2, 10]) {
+  // Clear of the service stairwell at x -32.6..-25.6: a 2.3 m bookcase laid
+  // across the bottom flight walls the stairs off completely.
+  // Nothing between z -20 and -13: that is the service stairwell, and a
+  // 2.3 m bookcase laid across the bottom flight walls the stairs off.
+  for (const z of [-23, -9, -3, 3, 10]) {
     b.box([MX0 + 5, 1.15, z], [7.0, 2.3, 0.55], 'woodDark');
     b.prop('shelf', MX0 + 5, 0, z, { yaw: 0 });
   }
@@ -360,7 +375,9 @@ function manor(b) {
   b.wall(MX0 + 10, -4, MX1 - 10, -4, F1, F2 - 0.5, 0.45, 'plaster', [
     { at: 8, width: 2.6, bottom: 0, top: 2.6 }, { at: 34, width: 2.6, bottom: 0, top: 2.6 },
   ]);
-  for (const [x, z] of [[MX0 + 5, -18], [MX0 + 5, 10], [MX1 - 5, -18], [MX1 - 5, 10]]) {
+  // Bedrooms. Kept out of the stairwell voids at x ±(25.4..32.8): a bed
+  // floating over the shaft is furniture you climb your head into.
+  for (const [x, z] of [[MX0 + 7, -22], [MX0 + 5, 10], [MX1 - 7, -22], [MX1 - 5, 10]]) {
     b.ext(x - 1.4, F1, z - 1.1, x + 1.4, F1 + 0.62, z + 1.1, 'woodDark');
     b.prop('bed', x, F1, z);
   }
@@ -448,8 +465,14 @@ function chapelWing(b) {
 
   // Choir gallery over the entrance — a strong angle down the nave. The stair
   // is entered from the nave side so it is not jammed against the end wall.
-  b.slab(X0 + 1, Z0 + 1, X1 - 1, Z0 + 9, 6.46, 0.46, 'wood');
-  b.railing(X0 + 1, Z0 + 9, X1 - 1, Z0 + 9, 6.4, 'wood', 1.05);
+  // The gallery deck is cut back around its own stair. Laid solid, its
+  // underside stopped you two thirds of the way up the flight.
+  // Deep enough to give the stair somewhere to arrive, and cut back around
+  // the upper flight — solid, the deck's own underside caught your head two
+  // thirds of the way up.
+  b.slabHole(X0 + 1, Z0 + 1, X1 - 1, Z0 + 12, 6.46, 0.46, 'wood',
+    [X0 + 3.4, Z0 + 2.6, X0 + 7.4, Z0 + 8.6]);
+  b.railing(X0 + 1, Z0 + 12, X1 - 1, Z0 + 12, 6.4, 'wood', 1.05);
   switchback(b, X0 + 1.2, Z0 + 2.6, X0 + 7.2, Z0 + 8.4, 0, 6.4, 1, 'wood', 'metal', true);
 
   // Bell tower over the west end — a shell, not a solid block.
