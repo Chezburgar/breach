@@ -762,8 +762,10 @@ const SPECIALS = {
   glass: () => new THREE.MeshPhysicalMaterial({
     color: 0xbcd4dd, metalness: 0, roughness: 0.05,
     transmission: 0.9, thickness: 0.05, ior: 1.45,
-    transparent: true, opacity: 0.3, side: THREE.DoubleSide,
-    depthWrite: false, envMapIntensity: 1.8,
+    transparent: true, opacity: 0.34, side: THREE.DoubleSide,
+    // Written to the depth buffer: without it, overlapping panes reorder as
+    // the camera moves and the windows flicker.
+    depthWrite: true, envMapIntensity: 1.8,
   }),
   water: () => new THREE.MeshPhysicalMaterial({
     color: 0x2f6f7c, metalness: 0.05, roughness: 0.04,

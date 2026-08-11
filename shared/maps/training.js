@@ -3,6 +3,12 @@
 
 import { MapBuilder } from './builder.js';
 
+// Vertical gap between layered outdoor surface patches, and the height the
+// building floors sit at so they clear the tallest stack. Laid at the same
+// height as the ground they z-fight and flicker against it.
+const PATCH_STEP = 0.012;
+const FLOOR = 0.05;
+
 export function buildTraining() {
   const b = new MapBuilder({
     id: 'training',
@@ -32,11 +38,21 @@ export function buildTraining() {
 
 function base(b) {
   b.ext(-86, -3, -86, 86, -0.35, 86, 'dirt');
-  // Each patch sits a millimetre above the previous one; overlapping patches
-  // at the same height z-fight and flicker between materials.
-  let layer = 0;
-  const patch = (x0, z0, x1, z1, m) =>
-    b.slab(x0 - 0.03, z0 - 0.03, x1 + 0.03, z1 + 0.03, (layer++) * 0.0012, 0.6, m);
+  // Overlapping surfaces are layered so no two are coplanar — a millimetre is
+  // inside the depth buffer's resolution at range and the ground flickers
+  // between materials as you turn. Each patch takes the lowest level that
+  // clears everything it touches, so the stack stays flat.
+  const placed = [];
+  const patch = (x0, z0, x1, z1, m) => {
+    let level = 0;
+    for (const q of placed) {
+      if (x0 - 0.04 < q.x1 && x1 + 0.04 > q.x0 && z0 - 0.04 < q.z1 && z1 + 0.04 > q.z0) {
+        level = Math.max(level, q.level + 1);
+      }
+    }
+    placed.push({ x0, z0, x1, z1, level });
+    return b.slab(x0 - 0.03, z0 - 0.03, x1 + 0.03, z1 + 0.03, level * PATCH_STEP, 0.6, m);
+  };
   patch(-86, -86, 86, 86, 'sand');
   // Downrange is dark asphalt so the targets read against it; the firing line
   // itself stays light concrete.
@@ -125,7 +141,7 @@ function range(b) {
 
 function shootHouse(b) {
   const X0 = 38, Z0 = -20, X1 = 76, Z1 = 30, H = 4.4;
-  b.slab(X0, Z0, X1, Z1, 0, 0.4, 'concrete');
+  b.slab(X0, Z0, X1, Z1, FLOOR, 0.4, 'concrete');
 
   // Open-topped CQB maze — walls only, so instructors (and spectators) can
   // look down into it from the catwalk.
@@ -180,7 +196,7 @@ function shootHouse(b) {
 
 function movementCourse(b) {
   const X0 = -76, Z0 = -22, X1 = -38, Z1 = 42;
-  b.slab(X0, Z0, X1, Z1, 0, 0.4, 'asphalt');
+  b.slab(X0, Z0, X1, Z1, FLOOR, 0.4, 'asphalt');
 
   // Ledge staircase — every step is exactly at the auto-step limit or above it,
   // so it doubles as a feel test for the step-up controller.
@@ -194,9 +210,11 @@ function movementCourse(b) {
   b.ext(X0 + 29.4, 0, Z0 + 6, X0 + 30, 3.4, Z0 + 20, 'concrete');
   b.decal('sign_text', X0 + 23, 3.8, Z0 + 5.6, { text: 'SLIDE' });
 
-  // Gap jumps of increasing width.
+  // Gap jumps of increasing width. The stride has to clear the widest pair
+  // (2.4 + 4.7 + 2.4) or the last jump's landing pad grows into the next
+  // jump's take-off and the two platforms z-fight where they overlap.
   for (let i = 0; i < 4; i++) {
-    const z = Z0 + 26 + i * 8;
+    const z = Z0 + 18 + i * 11;
     b.ext(X0 + 4, 0, z, X0 + 12, 2.2, z + 2.4, 'concrete');
     b.ext(X0 + 4, 0, z + 2.4 + (2.6 + i * 0.7), X0 + 12, 2.2, z + 4.8 + (2.6 + i * 0.7), 'concrete');
     b.decal('sign_text', X0 + 8, 2.6, z + 1.0, { text: `${(2.6 + i * 0.7).toFixed(1)}m` });
@@ -222,7 +240,7 @@ function movementCourse(b) {
 
 function armory(b) {
   const X0 = -30, Z0 = 36, X1 = 30, Z1 = 50, H = 5.0;
-  b.slab(X0, Z0, X1, Z1, 0, 0.4, 'concrete');
+  b.slab(X0, Z0, X1, Z1, FLOOR, 0.4, 'concrete');
   b.slab(X0, Z0, X1, Z1, H, 0.4, 'metal');
   b.wall(X0, Z0, X1, Z0, 0, H, 0.5, 'concrete', [{ at: 30, width: 6.0, bottom: 0, top: 3.4 }]);
   b.wall(X0, Z1, X1, Z1, 0, H, 0.5, 'concrete', []);

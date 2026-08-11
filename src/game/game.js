@@ -169,6 +169,8 @@ export class Game {
     });
     net.on('match.end', (msg) => this.endMatch(msg));
     net.on('match.over', () => this.leaveMatch());
+    // The host put a fresh match together — drop back to the waiting room.
+    net.on('rematch', () => this.leaveMatch());
     net.on('chat', (msg) => this.menu.toast(`${msg.name}: ${msg.text}`));
     net.on('err', (msg) => this.menu.toast(msg.msg, true));
 
@@ -204,6 +206,9 @@ export class Game {
   // ---------------------------------------------------------------- match
   async startMatch(msg) {
     const mode = getMode(msg.mode);
+    // Leaving the training ground has to take its targets and racks with it,
+    // or they turn up scattered across the estate.
+    this.disposeTraining();
     await this.setMap(msg.map);
 
     this.match = {
@@ -436,6 +441,10 @@ export class Game {
     if (msg.victim.id === this.net.id) {
       this.hud.showDeath(msg);
       this.audio.hurt();
+      // Whoever put you down gets their fanfare played over the banner.
+      if (msg.killer?.fanfare) {
+        setTimeout(() => this.audio.playFanfare(msg.killer.fanfare), 260);
+      }
     } else if (msg.killer?.id === this.net.id) {
       this.hud.toast('ELIMINATED', 900);
     }
@@ -464,7 +473,12 @@ export class Game {
   endMatch(msg) {
     this.phase = PHASE.OUTRO;
     this.input.releaseLock();
-    const won = this.hud.showVictory(msg, this.net.id, () => this.leaveMatch());
+    const won = this.hud.showVictory(msg, this.net.id, {
+      // Only the host can put a fresh match together; guests wait for them.
+      canRestart: !!this.net.isHost,
+      again: () => this.net.restartMatch?.(),
+      leave: () => { this.net.leave(); this.leaveMatch(); },
+    });
     if (msg.fanfare) this.audio.playFanfare(msg.fanfare);
 
     const mine = msg.board.find((p) => p.id === this.net.id);
@@ -477,11 +491,20 @@ export class Game {
     void won;
   }
 
+  disposeTraining() {
+    if (!this.training) return;
+    this.training.dispose();
+    this.training = null;
+    this._lastStand = null;
+  }
+
   leaveMatch() {
     this.inMatch = false;
     this.phase = PHASE.NONE;
     this.match = null;
     this.local = null;
+    this.disposeTraining();
+    this.grenadeView.clear();
     this.remotes.clear();
     this.roster.clear();
     this.hud.hide();

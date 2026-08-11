@@ -320,11 +320,9 @@ export class GameRoom {
         }
         break;
       case 'outro':
-        if (this.time >= this.phaseEnds) {
-          this.broadcast({ t: 'match.over' });
-          this.hub.destroyRoom(this);
-          return;
-        }
+        // The match rests here while everyone decides whether to play again.
+        // Tearing the room down on a timer would yank the victory screen away
+        // mid-decision; the host's session rebuilds or disposes it instead.
         break;
       default: break;
     }
@@ -788,7 +786,10 @@ export class GameRoom {
   }
 
   brief(p) {
-    return { id: p.id, name: p.name, banner: p.banner, level: p.level, team: p.team, bot: !!p.bot };
+    return {
+      id: p.id, name: p.name, banner: p.banner, fanfare: p.fanfare,
+      level: p.level, team: p.team, bot: !!p.bot,
+    };
   }
 
   // ------------------------------------------------------------- grenades

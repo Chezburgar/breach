@@ -625,11 +625,12 @@ export class ViewModel {
     this.holder.position.copy(pos);
     this.holder.rotation.copy(rot);
 
-    // Aiming must never be obstructed by the gun. Magnified optics hand over to
-    // the ocular entirely; even a red dot has its receiver and rail sitting
-    // right under the sight line, so the whole weapon is dropped once the sight
-    // picture is established. The reticle is drawn by the HUD, not the model.
-    const deployed = this.adsBlend > (m.magnification > 1.05 ? 0.7 : 0.88);
-    m.root.visible = !deployed;
+    // Magnified optics hand over to the picture-in-picture ocular, so the
+    // weapon is hidden — drawing it would put the scope body over the image you
+    // are looking through. Non-magnified sights stay visible: on a pistol or a
+    // red dot the gun *is* the sight picture, and hiding it looks broken.
+    // Sway is already zeroed at full ADS, which is what was pulling the
+    // receiver over the centre line before.
+    m.root.visible = !(m.magnification > 1.05 && this.adsBlend > 0.7);
   }
 }
