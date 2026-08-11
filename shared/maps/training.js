@@ -11,11 +11,11 @@ export function buildTraining() {
     bounds: { min: [-84, -6, -84], max: [84, 30, 84] },
     ambience: 'day',
     offline: true,
-    sun: { azimuth: 210, elevation: 46, intensity: 2.4, color: 0xfff6e8 },
-    sky: { turbidity: 3.6, rayleigh: 1.5, mieCoefficient: 0.004, mieDirectionalG: 0.78 },
-    fog: { color: 0x8fa2b2, density: 0.0026 },
-    envIntensity: 0.10,
-    exposure: 0.32,
+    sun: { azimuth: 210, elevation: 40, intensity: 1.9, color: 0xffeeda },
+    sky: { turbidity: 4.6, rayleigh: 1.3, mieCoefficient: 0.004, mieDirectionalG: 0.78 },
+    fog: { color: 0x8799aa, density: 0.0032 },
+    envIntensity: 0.085,
+    exposure: 0.26,
   });
 
   base(b);

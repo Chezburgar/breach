@@ -151,6 +151,13 @@ async function main() {
     }
   });
   net.on('close', () => menu.toast('Lost connection to the host.', true));
+  net.on('migrating', ({ rank }) => {
+    hud.toast(rank === 0 ? 'HOST LEFT — TAKING OVER' : 'HOST LEFT — RECONNECTING', 4000);
+    menu.toast('The host left. Moving the match to another player…');
+  });
+  net.on('migrated', ({ host }) => {
+    hud.toast(host ? 'YOU ARE NOW HOSTING' : 'RECONNECTED', 2500);
+  });
 
   // Audio needs a user gesture before it can start.
   const unlock = async () => { await audio.unlock(); menu.renderFanfares(); };

@@ -84,6 +84,16 @@ export class Session {
     this.pingTimer = null;
     this.pingSeq = 0;
     this.pending = new Map();
+    this.pendingHello = null;
+
+    // Host migration.
+    this.slot = null;
+    this.hostId = null;
+    this.migration = null;   // last session snapshot from the host
+    this.restore = null;     // score/round carried into a takeover
+    this.stateTimer = null;
+    this.watchdog = null;
+    this.lastHostAt = 0;
   }
 
   // ------------------------------------------------------------- plumbing
@@ -161,41 +171,72 @@ export class Session {
       if (!conn) return finish(null);
       conn.once('open', () => finish(conn));
       conn.once('error', () => finish(null));
-      setTimeout(() => { try { conn.close(); } catch { /* noop */ } finish(null); }, CONNECT_TIMEOUT);
+      setTimeout(() => {
+        // Only tear the attempt down if it never opened — closing a connection
+        // that succeeded drops the player out of the lobby they just joined.
+        if (settled) return;
+        try { conn.close(); } catch { /* noop */ }
+        finish(null);
+      }, CONNECT_TIMEOUT);
     });
   }
 
-  /** Quick play: drop into a public lobby, or open one if none are running. */
+  /**
+   * Quick play: drop into a public lobby, or open one if none are running.
+   *
+   * Slots are always walked in the same order, lowest first, by everyone. That
+   * is the whole trick — players converge on slot 1 and only spill into slot 2
+   * once it is full. Randomising the order (which is tempting, to "spread
+   * load") does the exact opposite and leaves everybody hosting an empty lobby
+   * of their own.
+   */
   async quickPlay() {
     this.setStatus('connecting', 'contacting relay');
     await this.open();
 
-    const order = [...Array(PUBLIC_SLOTS).keys()].map((i) => i + 1);
-    // Start from a random slot so a rush of players spreads across lobbies.
-    const start = Math.floor(Math.random() * PUBLIC_SLOTS);
-    const rotated = [...order.slice(start), ...order.slice(0, start)];
+    const slots = [...Array(PUBLIC_SLOTS).keys()].map((i) => i + 1);
 
-    for (const n of rotated) {
-      this.setStatus('searching', `checking lobby ${n}`);
+    for (const n of slots) {
+      this.setStatus('searching', `lobby ${n}`);
       const conn = await this.tryJoin(slotId(n));
-      if (conn) return this.becomeGuest(conn, `PUB${n}`);
+      if (!conn) continue;
+      const joined = await this.handshake(conn);
+      // A full lobby turns us away; carry on to the next slot.
+      if (joined) return this.becomeGuest(conn, `PUB${n}`);
+      try { conn.close(); } catch { /* noop */ }
     }
 
-    // Nobody home — host one.
-    for (const n of rotated) {
+    // Nobody home — open the lowest slot we can claim.
+    for (const n of slots) {
       try {
         this.setStatus('hosting', `opening lobby ${n}`);
         await this.open(slotId(n));
-        return this.becomeHost(`PUB${n}`, { isPrivate: false });
+        return this.becomeHost(`PUB${n}`, { isPrivate: false, slot: n });
       } catch (err) {
         if (err?.type !== 'unavailable-id') throw err;
-        // Someone claimed it while we were looking; try to join them instead.
+        // Someone claimed it while we were looking; join them instead.
         await this.open();
         const conn = await this.tryJoin(slotId(n));
-        if (conn) return this.becomeGuest(conn, `PUB${n}`);
+        if (conn && await this.handshake(conn)) return this.becomeGuest(conn, `PUB${n}`);
       }
     }
-    throw new Error('no lobby available');
+    throw new Error('every lobby is full');
+  }
+
+  /** Wait for the host's first message so a rejection is seen before joining. */
+  handshake(conn, timeout = 3500) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (ok) => { if (!settled) { settled = true; conn.off('data', onData); resolve(ok); } };
+      const onData = (raw) => {
+        const msg = typeof raw === 'string' ? safeParse(raw) : raw;
+        if (!msg) return;
+        if (msg.t === 'hello') { this.pendingHello = msg; done(true); }
+        else if (msg.t === 'err') done(false);
+      };
+      conn.on('data', onData);
+      setTimeout(() => done(false), timeout);
+    });
   }
 
   async hostPrivate(mode = DEFAULT_MODE, bots = 6) {
@@ -221,9 +262,19 @@ export class Session {
     this.code = code;
     this.conn = conn;
     this.connected = true;
+    this.hostId = conn.peer;
     this.setStatus('connected', code);
 
+    // The hello that got us past the handshake still has to reach the game.
+    if (this.pendingHello) {
+      const hello = this.pendingHello;
+      this.pendingHello = null;
+      this.id = hello.id;
+      queueMicrotask(() => this.emit('hello', hello));
+    }
+
     conn.on('data', (raw) => {
+      this.lastHostAt = performance.now();
       const msg = typeof raw === 'string' ? safeParse(raw) : raw;
       if (!msg || typeof msg.t !== 'string') return;
       if (msg.t === 'pong') {
@@ -235,6 +286,8 @@ export class Session {
         return;
       }
       if (msg.t === 'hello') this.id = msg.id;
+      // Keep the information needed to take over if the host disappears.
+      if (msg.t === 'session') { this.migration = msg; return; }
       this.emit(msg.t, msg);
     });
 
@@ -242,16 +295,108 @@ export class Session {
     conn.on('error', () => this.onHostLost());
 
     this.startPing();
+    this.startHostWatchdog();
     this.sendProfile();
     return { host: false, code };
   }
 
-  onHostLost() {
+  /**
+   * Closing a browser tab does not reliably close a data channel — the peer
+   * connection can sit in `connected` for tens of seconds before ICE gives up.
+   * Silence is the only dependable signal that the host is gone, and the host
+   * sends snapshots twenty times a second.
+   */
+  startHostWatchdog() {
+    this.stopHostWatchdog();
+    this.lastHostAt = performance.now();
+    this.watchdog = setInterval(() => {
+      if (!this.connected || this.isHost) return;
+      if (performance.now() - this.lastHostAt > 5000) {
+        this.stopHostWatchdog();
+        this.onHostLost();
+      }
+    }, 1000);
+  }
+
+  stopHostWatchdog() {
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
+  }
+
+  // ------------------------------------------------------- host migration
+  /**
+   * The host broadcasts who is present and where the match is up to. Everyone
+   * keeps the latest copy so that if the host vanishes the survivors can agree
+   * on a successor without talking to each other first.
+   */
+  pushSessionState() {
+    if (!this.isHost || !this.room) return;
+    this.broadcastAll({
+      t: 'session',
+      code: this.code,
+      slot: this.slot,
+      hostId: this.peer.id,
+      peers: [...this.clients.keys()],
+      scores: this.room.scores,
+      round: this.room.roundNo,
+      mode: this.pendingMode,
+    });
+  }
+
+  async onHostLost() {
     if (!this.connected) return;
     this.connected = false;
     this.stopPing();
+    this.stopHostWatchdog();
+
+    const state = this.migration;
+    const targetId = this.hostId;
+    if (!state || !targetId) return this.giveUp('Lost connection to the host.');
+
+    // Everyone ranks the survivors the same way, so exactly one of us claims
+    // the lobby and the rest wait to be let back in.
+    const survivors = (state.peers || []).filter((p) => p !== state.hostId).sort();
+    const rank = survivors.indexOf(this.peer?.id);
+    this.emit('migrating', { rank, survivors: survivors.length });
+    this.setStatus('migrating', 'host left — reconnecting');
+
+    if (rank === 0) {
+      // Give the old peer id a moment to be released by the broker.
+      await sleep(1200);
+      try {
+        await this.open(targetId);
+        this.pendingMode = state.mode || this.pendingMode;
+        this.restore = { scores: state.scores, round: state.round };
+        this.becomeHost(state.code || this.code, {
+          isPrivate: !String(state.code || '').startsWith('PUB'),
+          slot: state.slot,
+        });
+        this.emit('migrated', { host: true });
+        return;
+      } catch {
+        // Someone beat us to it; fall through and reconnect as a guest.
+      }
+    }
+
+    // Wait for the new host to come up, then rejoin.
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await sleep(1000 + rank * 150);
+      if (!this.peer || this.peer.destroyed) {
+        try { await this.open(); } catch { continue; }
+      }
+      const conn = await this.tryJoin(targetId);
+      if (conn && await this.handshake(conn)) {
+        this.becomeGuest(conn, state.code || this.code);
+        this.emit('migrated', { host: false });
+        return;
+      }
+    }
+    this.giveUp('The host left and the match could not be recovered.');
+  }
+
+  giveUp(reason) {
     this.emit('close');
-    this.emit('err', { msg: 'The host left. Returning to the menu.' });
+    this.emit('err', { msg: reason });
     this.emit('match.over');
   }
 
@@ -271,11 +416,13 @@ export class Session {
   }
 
   // ------------------------------------------------------------------ host
-  becomeHost(code, { isPrivate }) {
+  becomeHost(code, { isPrivate, slot = null }) {
     this.isHost = true;
     this.code = code;
+    this.slot = slot;
     this.connected = true;
     this.id = this.peer.id;
+    this.hostId = this.peer.id;
     this.setStatus('connected', code);
 
     const hub = {
@@ -308,9 +455,21 @@ export class Session {
     this.peer.on('error', (err) => console.warn('peer error', err));
 
     this.localClient.deliver(this.helloFor(this.localClient));
-    this.lobbyOpenedAt = performance.now() / 1000;
+
+    // Taking over from a departed host: carry the score across and get the
+    // next round underway rather than restarting the match.
+    if (this.restore) {
+      this.room.scores = [...this.restore.scores];
+      this.room.roundNo = this.restore.round || 0;
+      this.restore = null;
+      this.lobbyOpenedAt = performance.now() / 1000 - LOBBY_FILL_WAIT + 8;
+    } else {
+      this.lobbyOpenedAt = performance.now() / 1000;
+    }
+
     this.pushLobby();
     this.lobbyTimer = setInterval(() => this.lobbyTick(), 500);
+    this.stateTimer = setInterval(() => this.pushSessionState(), 2000);
 
     return { host: true, code };
   }
@@ -540,8 +699,13 @@ export class Session {
 
   teardown() {
     this.stopPing();
+    this.stopHostWatchdog();
     if (this.lobbyTimer) clearInterval(this.lobbyTimer);
+    if (this.stateTimer) clearInterval(this.stateTimer);
     this.lobbyTimer = null;
+    this.stateTimer = null;
+    this.migration = null;
+    this.restore = null;
     if (this.room) { this.room.dispose(); this.room = null; }
     for (const c of this.clients.values()) {
       if (c.conn) { try { c.conn.close(); } catch { /* noop */ } }
@@ -555,6 +719,8 @@ export class Session {
     this.setStatus('idle');
   }
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function safeParse(raw) {
   if (typeof raw !== 'string') return raw;

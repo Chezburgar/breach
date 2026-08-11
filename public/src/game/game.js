@@ -215,6 +215,9 @@ export class Game {
       timeLimit: msg.timeLimit,
       players: msg.players,
     };
+    // A fresh match — including one restarted under a new host — brings a new
+    // roster. Merging into the old one leaves ghosts from the previous match.
+    this.roster.clear();
     this.updateRoster(msg.players);
     this.myTeam = this.roster.get(this.net.id)?.team ?? -1;
     this.scores = [0, 0];
@@ -253,7 +256,8 @@ export class Game {
   }
 
   equipViewmodel() {
-    const rw = this.local.rw;
+    if (this.grenadeEquipped) return;   // a throwable is in hand
+    const rw = this.local?.rw;
     if (!rw) return;
     this.viewmodel.setWeapon(rw);
     this.scope.setWeapon(rw);
@@ -285,6 +289,7 @@ export class Game {
 
   onSpawn(msg) {
     if (!this.local) return;
+    this.grenadeEquipped = null;
     this.local.spawn(msg.pos, msg.yaw);
     if (msg.loadout) {
       this.local.setLoadout(msg.loadout);
@@ -375,12 +380,42 @@ export class Game {
     if (next) this.grenadeKind = next;
   }
 
+  /** Take a throwable in hand. Returns false if there is none to take. */
+  equipGrenade(kind) {
+    if (!this.local?.alive || this.paused) return false;
+    if (!GRENADE_IDS.includes(kind)) return false;
+    if (!this.grenadeStock[kind] || this.grenadeCooldown > 0) {
+      this.audio.click('error');
+      return false;
+    }
+    if (this.grenadeEquipped === kind) return true;
+    this.grenadeKind = kind;
+    this.grenadeEquipped = kind;
+    this.viewmodel.setGrenade(kind);
+    this.scope.setWeapon({ scope: { mag: 1, pip: false } });
+    this.audio.click('reload');
+    return true;
+  }
+
+  unequipGrenade() {
+    if (!this.grenadeEquipped) return;
+    this.grenadeEquipped = null;
+    this.equipViewmodel();
+  }
+
   throwGrenade() {
-    if (!this.local?.alive) return;
+    if (!this.local?.alive || !this.grenadeEquipped) return;
     if (this.grenadeCooldown > 0) return this.audio.click('error');
-    if (!this.grenadeStock[this.grenadeKind]) return this.audio.click('error');
-    this.net.send({ t: 'grenade', kind: this.grenadeKind, charge: 1 });
-    this.viewmodel.startMelee();   // reuse the throwing arc animation
+    const kind = this.grenadeEquipped;
+    if (!this.grenadeStock[kind]) return this.audio.click('error');
+
+    // The animation winds up before the grenade leaves the hand.
+    const delay = this.viewmodel.startThrow();
+    this.grenadeStock[kind] = 0;
+    setTimeout(() => {
+      this.net.send({ t: 'grenade', kind, charge: 1 });
+    }, delay * 1000);
+    setTimeout(() => this.unequipGrenade(), 620);
   }
 
   onKill(msg) {
@@ -538,12 +573,19 @@ export class Game {
     }
     if (this.paused) return;
 
-    if (input.wasPressed('grenade')) this.throwGrenade();
-    if (input.wasPressed('nade1')) { this.grenadeKind = 'frag'; this.audio.click('hover'); }
-    if (input.wasPressed('nade2')) { this.grenadeKind = 'flash'; this.audio.click('hover'); }
-    if (input.wasPressed('nade3')) { this.grenadeKind = 'smoke'; this.audio.click('hover'); }
+    // Throwables are equipped like a weapon: pick one up, then throw it with
+    // the fire button. `G` is a shortcut that equips and throws in one go.
+    if (input.wasPressed('nade1')) this.equipGrenade('frag');
+    if (input.wasPressed('nade2')) this.equipGrenade('flash');
+    if (input.wasPressed('nade3')) this.equipGrenade('smoke');
+    if (input.wasPressed('grenade')) {
+      if (this.grenadeEquipped) this.throwGrenade();
+      else if (this.equipGrenade(this.grenadeKind)) this.throwGrenade();
+    }
+    if (this.grenadeEquipped && input.takeMouseClick()) this.throwGrenade();
 
     if (input.wasPressed('reload')) {
+      if (this.grenadeEquipped) this.unequipGrenade();
       const r = this.local.startReload();
       if (r) {
         this.net.send({ t: 'reload' });
@@ -551,13 +593,19 @@ export class Game {
         this.audio.reloadSequence(r.duration, r.empty);
       }
     }
-    if (input.wasPressed('primary') && this.local.switchSlot('primary')) {
-      this.net.send({ t: 'switch', slot: 'primary' });
-      this.equipViewmodel();
+    if (input.wasPressed('primary')) {
+      if (this.grenadeEquipped) this.unequipGrenade();
+      if (this.local.switchSlot('primary')) {
+        this.net.send({ t: 'switch', slot: 'primary' });
+        this.equipViewmodel();
+      }
     }
-    if (input.wasPressed('secondary') && this.local.switchSlot('secondary')) {
-      this.net.send({ t: 'switch', slot: 'secondary' });
-      this.equipViewmodel();
+    if (input.wasPressed('secondary')) {
+      if (this.grenadeEquipped) this.unequipGrenade();
+      if (this.local.switchSlot('secondary')) {
+        this.net.send({ t: 'switch', slot: 'secondary' });
+        this.equipViewmodel();
+      }
     }
     const wheel = input.takeWheel();
     if (wheel !== 0) {
@@ -595,8 +643,10 @@ export class Game {
       this.input.takeLook();
     }
 
-    // Simulate and send.
-    const buttons = (this.input.locked && !this.paused) ? this.input.buttons() : 0;
+    // Simulate and send. A throwable in hand suppresses the trigger and the
+    // sights — the fire button throws instead.
+    let buttons = (this.input.locked && !this.paused) ? this.input.buttons() : 0;
+    if (this.grenadeEquipped) buttons &= ~(1 << 8 | 1 << 7);
     const cmds = this.local.step(dt, buttons, { frozen });
     if (cmds.length && this.net.connected) {
       // Resend a few recent commands for loss tolerance.
@@ -809,6 +859,7 @@ export class Game {
       myTeam: this.myTeam,
       blind: Math.max(0, this.blindUntil - performance.now() / 1000),
       grenadeKind: this.grenadeKind,
+      grenadeEquipped: this.grenadeEquipped,
       grenadeStock: this.grenadeStock,
       grenadeCooldown: this.grenadeCooldown,
       grenadeCooldownMax: GRENADE_COOLDOWN,

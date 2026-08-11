@@ -8,7 +8,11 @@
 import * as THREE from 'three';
 import { VIEW } from '/shared/constants.js';
 
-const PIP_MIN_MAG = 2.0;
+// Every magnified optic renders picture-in-picture. Anything else leaves the
+// scope body sitting over the middle of the screen while you are supposedly
+// looking through it.
+const PIP_MIN_MAG = 1.4;
+const PIP_IN = 0.65;      // ADS progress at which the ocular takes over
 
 export class ScopeRenderer {
   constructor(renderer, worldScene, rig) {
@@ -74,7 +78,7 @@ export class ScopeRenderer {
    */
   update(blend, camera, vmCamera, baseFov) {
     this.blend = blend;
-    this.active = this.pip && blend > 0.55;
+    this.active = this.pip && blend > PIP_IN;
     this.disc.visible = this.active;
     if (!this.active) return;
 

@@ -62,7 +62,7 @@ export class HUD {
     drawScopeOverlay(this.scopeCanvas, {
       visible: s.pipActive,
       radius: s.scopeRadius,
-      blend: Math.min(1, Math.max(0, (s.adsBlend - 0.55) / 0.3)),
+      blend: Math.min(1, Math.max(0, (s.adsBlend - 0.65) / 0.22)),
       reticle: s.scopeReticle,
       tint: s.scopeTint,
       offsetX: s.scopeSway?.x || 0,
@@ -130,12 +130,12 @@ export class HUD {
     const bar = $('grenade-bar');
     if (!s.grenadeStock) return;
     const cd = s.grenadeCooldown || 0;
-    const key = `${s.grenadeKind}|${GRENADE_ORDER.map((k) => s.grenadeStock[k]).join('')}|${Math.ceil(cd)}`;
+    const key = `${s.grenadeEquipped}|${GRENADE_ORDER.map((k) => s.grenadeStock[k]).join('')}|${Math.ceil(cd)}`;
     if (bar.dataset.key !== key) {
       bar.dataset.key = key;
       bar.innerHTML = GRENADE_ORDER.map((k, i) => {
         const have = s.grenadeStock[k];
-        const active = k === s.grenadeKind;
+        const active = k === s.grenadeEquipped;
         const pct = cd > 0 ? (cd / (s.grenadeCooldownMax || 15)) * 100 : 0;
         return `<div class="gnd ${active ? 'active' : ''} ${have ? '' : 'spent'}">
             ${GRENADE_GLYPH[k]}

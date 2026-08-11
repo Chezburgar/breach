@@ -329,6 +329,58 @@ export function buildWeaponModel(resolved) {
   };
 }
 
+/**
+ * A throwable held in the hand. Returns the same shape as a weapon so the
+ * animator does not need to care which is equipped.
+ */
+export function buildGrenadeModel(kind) {
+  const M = materials({ body: 0x3f4a33, furn: 0x2c3327 });
+  const root = new THREE.Group();
+  root.name = `grenade:${kind}`;
+
+  const tint = { frag: 0x3f4a33, flash: 0xb9b19a, smoke: 0x5c6266 }[kind] || 0x3f4a33;
+  const shell = new THREE.MeshStandardMaterial({ color: tint, metalness: 0.55, roughness: 0.5 });
+
+  if (kind === 'frag') {
+    addMesh(root, new THREE.SphereGeometry(0.045, 12, 10), shell, [0, 0, 0]);
+    addMesh(root, cyl(0.016, 0.016, 0.022, 8), M.dark, [0, 0.05, 0]);
+    addMesh(root, box(0.010, 0.052, 0.014), M.steel, [0.022, 0.03, 0]);
+    addMesh(root, cyl(0.006, 0.006, 0.018, 8), M.steel, [0.03, 0.052, 0], [Math.PI / 2, 0, 0]);
+  } else {
+    addMesh(root, cyl(0.032, 0.032, 0.115, 12), shell, [0, 0, 0]);
+    addMesh(root, cyl(0.034, 0.034, 0.012, 12), M.dark, [0, 0.052, 0]);
+    addMesh(root, cyl(0.014, 0.014, 0.02, 8), M.dark, [0, 0.068, 0]);
+    addMesh(root, box(0.010, 0.06, 0.014), M.steel, [0.028, 0.03, 0]);
+    for (let i = 0; i < 3; i++) {
+      addMesh(root, cyl(0.033, 0.033, 0.004, 12), M.dark, [0, -0.03 + i * 0.03, 0]);
+    }
+  }
+
+  // Gloved hand wrapped around it.
+  const hand = new THREE.Group();
+  addMesh(hand, box(0.055, 0.062, 0.08), M.glove, [0, 0, 0]);
+  addMesh(hand, box(0.05, 0.03, 0.032), M.glove, [0, -0.03, -0.016]);
+  addMesh(hand, box(0.056, 0.052, 0.052), M.glove, [0, 0.046, 0.028]);
+  hand.position.set(0.004, -0.055, 0.012);
+  hand.rotation.set(0.25, 0, 0.1);
+  root.add(hand);
+
+  const aimPoint = new THREE.Object3D();
+  aimPoint.position.set(0, 0.05, 0);
+  root.add(aimPoint);
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0, -0.05);
+  root.add(muzzle);
+
+  root.traverse((o) => { o.frustumCulled = false; });
+
+  return {
+    root, aimPoint, muzzle, eject: muzzle,
+    magGroup: null, magHome: [0, 0, 0], charging: null,
+    opticId: 'iron', magnification: 1, isGrenade: true, kind,
+  };
+}
+
 // ---------------------------------------------------------- the animator
 // The weapon is drawn slightly under life size and pushed away from the eye,
 // which is the standard first-person cheat: at true scale and true distance a
@@ -362,20 +414,41 @@ export class ViewModel {
     this.swap = 0;
     this.melee = 0;
     this.inspect = 0;
+    this.throwT = 0;
     this._tmp = new THREE.Vector3();
   }
 
+  clearModel() {
+    if (!this.model) return;
+    this.holder.remove(this.model.root);
+    this.model.root.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
+    this.model = null;
+  }
+
   setWeapon(resolved) {
-    if (this.model) {
-      this.holder.remove(this.model.root);
-      this.model.root.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
-    }
+    this.clearModel();
     this.model = buildWeaponModel(resolved);
     this.resolved = resolved;
     this.model.root.scale.setScalar(VM_SCALE);
     this.holder.add(this.model.root);
     this.swap = 0.45;
     return this.model;
+  }
+
+  setGrenade(kind) {
+    this.clearModel();
+    this.model = buildGrenadeModel(kind);
+    this.resolved = null;
+    this.model.root.scale.setScalar(VM_SCALE);
+    this.holder.add(this.model.root);
+    this.swap = 0.35;
+    return this.model;
+  }
+
+  /** Over-arm throw. Returns the moment the grenade should actually leave. */
+  startThrow() {
+    this.throwT = 0.55;
+    return 0.18;
   }
 
   /** Kick from a shot: back, up, and a little roll. */
@@ -479,6 +552,20 @@ export class ViewModel {
       rot.x -= f * f * 0.9;
     }
 
+    if (this.throwT > 0) {
+      this.throwT = Math.max(0, this.throwT - dt);
+      const f = 1 - this.throwT / 0.55;
+      // Wind up behind the shoulder, then whip forward.
+      const wind = f < 0.34 ? f / 0.34 : 0;
+      const release = f >= 0.34 ? Math.min(1, (f - 0.34) / 0.3) : 0;
+      pos.z += wind * 0.24 - release * 0.30;
+      pos.y += wind * 0.16 - release * 0.06;
+      pos.x += wind * 0.05;
+      rot.x -= wind * 0.9 - release * 1.5;
+      rot.z += wind * 0.3;
+      if (this.model?.isGrenade) this.model.root.visible = f < 0.42;
+    }
+
     if (this.melee > 0) {
       this.melee = Math.max(0, this.melee - dt);
       const f = 1 - this.melee / 0.6;
@@ -536,11 +623,10 @@ export class ViewModel {
     this.holder.position.copy(pos);
     this.holder.rotation.copy(rot);
 
-    // The optic's glass should not occlude the reticle overlay while aiming.
-    if (m.opticId !== 'iron' && this.adsBlend > 0.9) {
-      m.root.visible = m.magnification < 2.4;
-    } else {
-      m.root.visible = true;
-    }
+    // Once a magnified optic is deployed the ocular fills the screen, so the
+    // weapon itself is hidden. Leaving it drawn puts the scope body and the
+    // rest of the gun on top of the very image you are meant to be looking
+    // through. Non-magnified sights stay visible — you shoot around them.
+    m.root.visible = !(m.magnification > 1.05 && this.adsBlend > 0.7);
   }
 }

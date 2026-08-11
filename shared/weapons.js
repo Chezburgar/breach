@@ -14,7 +14,7 @@ export const SCOPES = {
   reddot: { id: 'reddot', name: 'Red Dot Sight A',  mag: 1.0, reticle: 'dot',     pip: false, glass: true, tint: 0xff3b30 },
   holo:   { id: 'holo',   name: 'Holo Sight B',     mag: 1.0, reticle: 'holo',    pip: false, glass: true, tint: 0xff4a3a },
   reflex: { id: 'reflex', name: 'Reflex Sight C',   mag: 1.0, reticle: 'chevron', pip: false, glass: true, tint: 0x37ff8b },
-  x15:    { id: 'x15',    name: '1.5x Scope',       mag: 1.5, reticle: 'x15',     pip: false, glass: true, tint: 0xff5540 },
+  x15:    { id: 'x15',    name: '1.5x Scope',       mag: 1.5, reticle: 'x15',     pip: true,  glass: true, tint: 0xff5540 },
   x2:     { id: 'x2',     name: '2.0x Scope',       mag: 2.0, reticle: 'x2',      pip: true,  glass: true, tint: 0xff5540 },
   x25:    { id: 'x25',    name: '2.5x Scope',       mag: 2.5, reticle: 'x25',     pip: true,  glass: true, tint: 0xff5540 },
   x3:     { id: 'x3',     name: '3.0x Scope',       mag: 3.0, reticle: 'x3',      pip: true,  glass: true, tint: 0xff5540 },
@@ -57,7 +57,7 @@ const DEFS = [
     falloff: { start: 22, end: 48, minMul: 0.62 }, pen: 0.16,
     recoil: { vert: 0.62, vertVar: 0.10, horiz: 0.30, drift: 0.42, recovery: 7.4, firstShot: 1.35, kick: 0.020 },
     spread: { hip: 2.9, hipMove: 2.2, ads: 0.16, adsMove: 0.9, growth: 0.36, decay: 5.2, max: 6.5 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex', 'x15', 'x25'], defaultScope: 'holo',
+    scopes: ['reddot', 'holo', 'reflex', 'x15', 'x25'], defaultScope: 'holo',
     shape: { family: 'ar', barrel: 0.40, handguard: 'rail', stock: 'collapsible', mag: 'straight', body: 0x2c2e33, furn: 0x24262a, len: 0.62 },
   },
   {
@@ -67,7 +67,7 @@ const DEFS = [
     falloff: { start: 24, end: 52, minMul: 0.60 }, pen: 0.20,
     recoil: { vert: 0.74, vertVar: 0.12, horiz: 0.34, drift: -0.50, recovery: 6.8, firstShot: 1.30, kick: 0.024 },
     spread: { hip: 3.2, hipMove: 2.4, ads: 0.17, adsMove: 1.0, growth: 0.40, decay: 5.0, max: 7.0 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex', 'x15', 'x25'], defaultScope: 'reddot',
+    scopes: ['reddot', 'holo', 'reflex', 'x15', 'x25'], defaultScope: 'reddot',
     shape: { family: 'ar', barrel: 0.44, handguard: 'polymer', stock: 'fixed', mag: 'curved', body: 0x33302b, furn: 0x3d2f22, len: 0.64 },
   },
   {
@@ -77,7 +77,7 @@ const DEFS = [
     falloff: { start: 24, end: 50, minMul: 0.64 }, pen: 0.16,
     recoil: { vert: 0.52, vertVar: 0.08, horiz: 0.24, drift: 0.30, recovery: 8.0, firstShot: 1.25, kick: 0.017 },
     spread: { hip: 2.7, hipMove: 2.0, ads: 0.14, adsMove: 0.85, growth: 0.31, decay: 5.6, max: 6.0 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex', 'x15', 'x2', 'x25'], defaultScope: 'reflex',
+    scopes: ['reddot', 'holo', 'reflex', 'x15', 'x2', 'x25'], defaultScope: 'reflex',
     shape: { family: 'ar', barrel: 0.38, handguard: 'rail', stock: 'collapsible', mag: 'straight', body: 0x2a2c30, furn: 0x232529, len: 0.60 },
   },
   {
@@ -87,7 +87,7 @@ const DEFS = [
     falloff: { start: 26, end: 54, minMul: 0.66 }, pen: 0.18,
     recoil: { vert: 0.48, vertVar: 0.07, horiz: 0.20, drift: 0.22, recovery: 8.6, firstShot: 1.20, kick: 0.016 },
     spread: { hip: 3.0, hipMove: 2.1, ads: 0.13, adsMove: 0.80, growth: 0.28, decay: 5.8, max: 6.0 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex', 'x15', 'x2', 'x25', 'x3'], defaultScope: 'x15',
+    scopes: ['reddot', 'holo', 'reflex', 'x15', 'x2', 'x25', 'x3'], defaultScope: 'x15',
     shape: { family: 'bullpup', barrel: 0.34, handguard: 'polymer', stock: 'bullpup', mag: 'straight', body: 0x22261f, furn: 0x1b1f19, len: 0.70 },
   },
   {
@@ -97,7 +97,7 @@ const DEFS = [
     falloff: { start: 20, end: 44, minMul: 0.60 }, pen: 0.14,
     recoil: { vert: 0.58, vertVar: 0.11, horiz: 0.36, drift: -0.38, recovery: 8.2, firstShot: 1.15, kick: 0.018 },
     spread: { hip: 3.1, hipMove: 2.3, ads: 0.18, adsMove: 0.95, growth: 0.34, decay: 6.0, max: 6.8 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex', 'x15', 'x2'], defaultScope: 'holo',
+    scopes: ['reddot', 'holo', 'reflex', 'x15', 'x2'], defaultScope: 'holo',
     shape: { family: 'bullpup', barrel: 0.36, handguard: 'polymer', stock: 'bullpup', mag: 'straight', body: 0x2f3134, furn: 0x26282b, len: 0.68 },
   },
   {
@@ -119,7 +119,7 @@ const DEFS = [
     falloff: { start: 16, end: 36, minMul: 0.55 }, pen: 0.08,
     recoil: { vert: 0.34, vertVar: 0.06, horiz: 0.18, drift: 0.26, recovery: 9.4, firstShot: 1.10, kick: 0.012 },
     spread: { hip: 2.4, hipMove: 1.7, ads: 0.13, adsMove: 0.72, growth: 0.24, decay: 6.6, max: 5.2 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex', 'x15'], defaultScope: 'reddot',
+    scopes: ['reddot', 'holo', 'reflex', 'x15'], defaultScope: 'reddot',
     shape: { family: 'smg', barrel: 0.24, handguard: 'polymer', stock: 'collapsible', mag: 'curved', body: 0x26282c, furn: 0x1f2124, len: 0.46 },
   },
   {
@@ -129,7 +129,7 @@ const DEFS = [
     falloff: { start: 13, end: 30, minMul: 0.52 }, pen: 0.06,
     recoil: { vert: 0.26, vertVar: 0.05, horiz: 0.16, drift: -0.20, recovery: 11.0, firstShot: 1.05, kick: 0.010 },
     spread: { hip: 2.2, hipMove: 1.6, ads: 0.15, adsMove: 0.70, growth: 0.20, decay: 7.2, max: 4.8 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex'], defaultScope: 'holo',
+    scopes: ['reddot', 'holo', 'reflex'], defaultScope: 'holo',
     shape: { family: 'smg', barrel: 0.16, handguard: 'rail', stock: 'folding', mag: 'straight', body: 0x2b2d31, furn: 0x212327, len: 0.40 },
   },
   {
@@ -149,7 +149,7 @@ const DEFS = [
     falloff: { start: 14, end: 32, minMul: 0.54 }, pen: 0.10,
     recoil: { vert: 0.32, vertVar: 0.06, horiz: 0.20, drift: -0.28, recovery: 10.2, firstShot: 1.08, kick: 0.011 },
     spread: { hip: 2.3, hipMove: 1.7, ads: 0.14, adsMove: 0.72, growth: 0.23, decay: 6.9, max: 5.0 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex', 'x15'], defaultScope: 'reflex',
+    scopes: ['reddot', 'holo', 'reflex', 'x15'], defaultScope: 'reflex',
     shape: { family: 'smg', barrel: 0.14, handguard: 'polymer', stock: 'folding', mag: 'straight', body: 0x2a2c2f, furn: 0x212326, len: 0.38 },
   },
 
@@ -195,7 +195,7 @@ const DEFS = [
     falloff: { start: 30, end: 62, minMul: 0.68 }, pen: 0.26,
     recoil: { vert: 0.72, vertVar: 0.16, horiz: 0.40, drift: 0.46, recovery: 6.0, firstShot: 1.30, kick: 0.026 },
     spread: { hip: 4.2, hipMove: 3.2, ads: 0.22, adsMove: 1.6, growth: 0.30, decay: 4.6, max: 8.0 },
-    scopes: ['iron', 'reddot', 'holo', 'reflex', 'x15', 'x2'], defaultScope: 'x15',
+    scopes: ['reddot', 'holo', 'reflex', 'x15', 'x2'], defaultScope: 'x15',
     shape: { family: 'lmg', barrel: 0.52, handguard: 'rail', stock: 'fixed', mag: 'drum', body: 0x2b2d2f, furn: 0x232527, len: 0.78 },
   },
 
