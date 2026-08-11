@@ -49,7 +49,8 @@ export function saveProfile(p) {
 }
 
 export class Menu {
-  constructor({ profile, net, audio, onPlay, onTraining, onQuality, onProfileChange }) {
+  constructor({ profile, net, audio, onPlay, onTraining, onQuality, onProfileChange,
+                onHost, onJoinCode, onLeaveLobby, onAutoQuality }) {
     this.profile = profile;
     this.net = net;
     this.audio = audio;
@@ -57,6 +58,10 @@ export class Menu {
     this.onTraining = onTraining;
     this.onQuality = onQuality;
     this.onProfileChange = onProfileChange;
+    this.onHost = onHost;
+    this.onJoinCode = onJoinCode;
+    this.onLeaveLobby = onLeaveLobby;
+    this.onAutoQuality = onAutoQuality;
 
     this.el = $('menu');
     this.editingSlot = 'primary';
@@ -129,17 +134,17 @@ export class Menu {
 
     $('party-create').addEventListener('click', () => {
       this.click();
-      this.net.send({ t: 'group.create', kind: 'party' });
+      this.onHost?.();
     });
     $('party-join').addEventListener('click', () => {
       const code = $('party-code').value.trim().toUpperCase();
       if (!code) return this.click('error');
       this.click();
-      this.net.send({ t: 'group.join', code });
+      this.onJoinCode?.(code);
     });
     $('private-create').addEventListener('click', () => {
       this.click();
-      this.net.send({ t: 'group.create', kind: 'private', mode: 'tdm' });
+      this.onHost?.();
     });
     $('open-training').addEventListener('click', () => {
       this.click();
@@ -418,7 +423,7 @@ export class Menu {
   buildLobby() {
     $('lobby-leave').addEventListener('click', () => {
       this.click('back');
-      this.net.send({ t: 'group.leave' });
+      this.onLeaveLobby?.();
     });
     $('lobby-start').addEventListener('click', () => {
       this.click();
@@ -430,7 +435,7 @@ export class Menu {
     });
     $('search-cancel').addEventListener('click', () => {
       this.click('back');
-      this.net.send({ t: 'unqueue' });
+      this.onLeaveLobby?.();
       this.setSearching(false);
     });
   }

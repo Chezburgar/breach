@@ -8,9 +8,9 @@
 // The result is cached per map, since it is deterministic and costs a few
 // tens of milliseconds to build.
 
-import { PLAYER, BTN, FIXED_DT, MOVE } from '../shared/constants.js';
-import { cylinderBlocked, groundUnder } from '../shared/collision.js';
-import { createPlayerState, stepPlayer } from '../shared/controller.js';
+import { PLAYER, BTN, FIXED_DT, MOVE } from '../constants.js';
+import { cylinderBlocked, groundUnder } from '../collision.js';
+import { createPlayerState, stepPlayer } from '../controller.js';
 
 const LINK_RANGE = 20;      // metres of horizontal separation worth testing
 const MAX_CLIMB = 7.0;      // a link may gain at most this much height

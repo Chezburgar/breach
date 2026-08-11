@@ -2,7 +2,7 @@
 
 import { AudioEngine } from './engine/audio.js';
 import { TextureLab } from './engine/textures.js';
-import { NetClient } from './net/client.js';
+import { Session } from './net/session.js';
 import { Game } from './game/game.js';
 import { HUD } from './ui/hud.js';
 import { Menu, loadProfile, saveProfile } from './ui/menu.js';
@@ -32,7 +32,7 @@ async function main() {
 
   await progress(0.2, 'starting renderer');
   const audio = new AudioEngine();
-  const net = new NetClient();
+  const net = new Session(profile);
   const hud = new HUD();
 
   let game;
@@ -56,10 +56,48 @@ async function main() {
     profile,
     net,
     audio,
-    onPlay: (mode) => {
+    onPlay: async (mode) => {
       audio.unlock();
-      net.send({ t: 'queue', mode });
       menu.setSearching(true, { mode });
+      try {
+        const res = await net.quickPlay();
+        menu.toast(res.host
+          ? `Hosting lobby ${res.code} — waiting for players`
+          : `Joined lobby ${res.code}`);
+      } catch (err) {
+        console.error(err);
+        menu.setSearching(false);
+        menu.toast('Could not reach the matchmaking relay.', true);
+      }
+    },
+    onHost: async () => {
+      audio.unlock();
+      menu.setSearching(true, { mode: 'breach' });
+      try {
+        const res = await net.hostPrivate('breach', 6);
+        menu.setSearching(false);
+        menu.toast(`Lobby ${res.code} open — share the code`);
+      } catch (err) {
+        console.error(err);
+        menu.setSearching(false);
+        menu.toast('Could not open a lobby.', true);
+      }
+    },
+    onJoinCode: async (code) => {
+      audio.unlock();
+      menu.setSearching(true, { mode: 'breach' });
+      try {
+        await net.joinCode(code);
+        menu.setSearching(false);
+      } catch (err) {
+        menu.setSearching(false);
+        menu.toast(err.message || 'Could not join that lobby.', true);
+      }
+    },
+    onLeaveLobby: () => {
+      net.teardown();
+      menu.setGroup(null, net.id);
+      menu.setSearching(false);
     },
     onTraining: async () => {
       await audio.unlock();
@@ -94,18 +132,7 @@ async function main() {
     menu.toast(`Graphics lowered to ${level.toUpperCase()} (${fps} fps)`);
   };
 
-  await progress(0.9, 'connecting');
-
-  net.on('open', () => {
-    net.send({
-      t: 'profile',
-      name: profile.name,
-      banner: profile.banner,
-      fanfare: profile.fanfare,
-      level: profile.level,
-      loadout: profile.loadout,
-    });
-  });
+  await progress(0.9, 'ready');
 
   net.on('hello', (msg) => {
     menu.setOnline(msg.online);
@@ -118,11 +145,12 @@ async function main() {
   });
 
   net.on('group', (msg) => menu.setGroup(msg.group, net.id));
-
-  net.on('close', () => menu.toast('Connection lost — reconnecting…', true));
-  net.on('versionMismatch', () => menu.toast('Client is out of date. Reload the page.', true));
-
-  net.connect();
+  net.on('status', ({ status, detail }) => {
+    if (status === 'searching' || status === 'hosting' || status === 'connecting') {
+      menu.setSearching(true, { mode: 'breach', found: 0, wait: 0, detail });
+    }
+  });
+  net.on('close', () => menu.toast('Lost connection to the host.', true));
 
   // Audio needs a user gesture before it can start.
   const unlock = async () => { await audio.unlock(); menu.renderFanfares(); };

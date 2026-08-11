@@ -5,12 +5,12 @@
 // is a small state machine — patrol, engage, reposition — over the map's
 // navigation graph.
 
-import { BTN, PLAYER } from '../shared/constants.js';
-import { hasLineOfSight } from '../shared/collision.js';
-import { eyePosition } from '../shared/controller.js';
-import { anglesFromDir, angleDelta, clamp, vdist, vsub, vnorm } from '../shared/mathx.js';
-import { PRIMARIES, SECONDARIES } from '../shared/weapons.js';
-import { BANNERS, DEFAULT_FANFARE, BUILTIN_FANFARES } from '../shared/cosmetics.js';
+import { BTN, PLAYER } from '../constants.js';
+import { hasLineOfSight } from '../collision.js';
+import { eyePosition } from '../controller.js';
+import { anglesFromDir, angleDelta, clamp, vdist, vsub, vnorm } from '../mathx.js';
+import { PRIMARIES, SECONDARIES } from '../weapons.js';
+import { BANNERS, DEFAULT_FANFARE, BUILTIN_FANFARES } from '../cosmetics.js';
 import { findPath, nearestNode, nearestReachableNode } from './nav.js';
 
 export const BOT_NAMES = [

@@ -6,3 +6,4 @@ Thumbs.db
 .env
 public/vendor/
 tools/shots/
+dist/

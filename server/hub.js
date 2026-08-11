@@ -6,7 +6,7 @@ import { getMode, MODES, QUICKPLAY_MODES } from '../shared/modes.js';
 import { COMBAT_MAPS, MAP_INFO } from '../shared/maps/index.js';
 import { sanitizeLoadout } from '../shared/weapons.js';
 import { sanitizeName, randomName, DEFAULT_BANNER, DEFAULT_FANFARE, BANNERS } from '../shared/cosmetics.js';
-import { GameRoom } from './room.js';
+import { GameRoom } from '../shared/sim/room.js';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MATCH_TARGET = 10;

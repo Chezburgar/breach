@@ -3,21 +3,25 @@
 import {
   FIXED_DT, INTERP_DELAY, MATCH, MAX_ROLLBACK, PLAYER, SNAPSHOT_DT,
   BTN, HIT_MULTIPLIER, TEAM_INFO,
-} from '../shared/constants.js';
-import { buildWorld, raycastWorld, rayPlayer, hasLineOfSight } from '../shared/collision.js';
-import { createPlayerState, stepPlayer, eyePosition } from '../shared/controller.js';
-import { getMap } from '../shared/maps/index.js';
-import { zoneAt } from '../shared/maps/builder.js';
-import { getMode } from '../shared/modes.js';
+} from '../constants.js';
+import { buildWorld, raycastWorld, rayPlayer, hasLineOfSight } from '../collision.js';
+import { createPlayerState, stepPlayer, eyePosition } from '../controller.js';
+import { getMap } from '../maps/index.js';
+import { zoneAt } from '../maps/builder.js';
+import { getMode } from '../modes.js';
 import {
   resolveWeapon, currentSpread, damageAt, getWeapon, sanitizeLoadout,
-} from '../shared/weapons.js';
+} from '../weapons.js';
 import {
   GRENADE_COOLDOWN, GRENADE_GRAVITY, getGrenade, fragDamage, flashBlind,
-} from '../shared/grenades.js';
-import { clamp, dirFromAngles, hashString, makeRng, vdist, vnorm, vsub } from '../shared/mathx.js';
+} from '../grenades.js';
+import { clamp, dirFromAngles, hashString, makeRng, vdist, vnorm, vsub } from '../mathx.js';
 import { buildNavGraph } from './nav.js';
 import { Bot, BOT_NAMES } from './bots.js';
+
+// Monotonic seconds. performance.now() exists in both Node and the browser,
+// which is what lets this simulation run on either side.
+const now = () => performance.now() / 1000;
 
 const HISTORY_TICKS = 48;      // ~0.8s of rewind material
 const MELEE_RANGE = 2.4;
@@ -83,7 +87,7 @@ export class GameRoom {
     });
     this.pushPhase();
 
-    this.last = process.hrtime.bigint();
+    this.last = now();
     this.accum = 0;
     this.timer = setInterval(() => this.pump(), 1000 / 120);
   }
@@ -99,9 +103,9 @@ export class GameRoom {
   }
 
   pump() {
-    const now = process.hrtime.bigint();
-    let dt = Number(now - this.last) / 1e9;
-    this.last = now;
+    const t = now();
+    let dt = t - this.last;
+    this.last = t;
     if (dt > 0.25) dt = 0.25;          // a stall must not fast-forward the match
     this.accum += dt;
     let guard = 0;

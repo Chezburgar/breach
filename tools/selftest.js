@@ -9,8 +9,8 @@ import { createPlayerState, stepPlayer } from '../shared/controller.js';
 import { FIXED_DT, PLAYER, BTN } from '../shared/constants.js';
 import { MODE_IDS, MODES } from '../shared/modes.js';
 import { WEAPON_LIST, resolveWeapon, recoilAt, currentSpread } from '../shared/weapons.js';
-import { GameRoom } from '../server/room.js';
-import { buildNavGraph } from '../server/nav.js';
+import { GameRoom } from '../shared/sim/room.js';
+import { buildNavGraph } from '../shared/sim/nav.js';
 
 let failures = 0;
 const ok = (cond, label, detail = '') => {
