@@ -29,11 +29,12 @@ export function buildEstate() {
     ambience: 'evening',
     // Sun sits high and side-on. Down the north-south axis either team would
     // be shooting into it, which decides fights on spawn rather than on play.
-    sun: { azimuth: 104, elevation: 44, intensity: 3.3, color: 0xffe7c8 },
-    sky: { turbidity: 4.4, rayleigh: 1.4, mieCoefficient: 0.006, mieDirectionalG: 0.82 },
-    fog: { color: 0x7d89a0, density: 0.0026 },
-    envIntensity: 0.19,
-    exposure: 0.42,
+    // Low turbidity and rayleigh keep the horizon from blowing out.
+    sun: { azimuth: 104, elevation: 44, intensity: 2.6, color: 0xffe7c8 },
+    sky: { turbidity: 2.4, rayleigh: 0.85, mieCoefficient: 0.003, mieDirectionalG: 0.76 },
+    fog: { color: 0x66748c, density: 0.0030 },
+    envIntensity: 0.12,
+    exposure: 0.30,
   });
 
   ground(b);

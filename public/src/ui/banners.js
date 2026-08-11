@@ -12,7 +12,10 @@ export const customBanners = [];
 /** Load any drop-in banner artwork. Safe to call before the menu appears. */
 export async function loadBannerManifest() {
   try {
-    const res = await fetch('/assets/banners/manifest.json', { cache: 'no-cache' });
+    // Resolved against this module — the game is served from a subpath on
+    // GitHub Pages, where a leading slash points at the domain root.
+    const base = new URL('../../assets/banners/', import.meta.url);
+    const res = await fetch(new URL('manifest.json', base), { cache: 'no-cache' });
     if (!res.ok) return [];
     const data = await res.json();
     const list = Array.isArray(data) ? data : data.banners || [];
@@ -22,7 +25,7 @@ export async function loadBannerManifest() {
         id: entry.id || `img_${entry.file}`,
         name: entry.name || entry.file.replace(/\.[a-z0-9]+$/i, ''),
         rarity: entry.rarity || 'epic',
-        image: `/assets/banners/${entry.file}`,
+        image: new URL(entry.file, base).href,
       };
       customBanners.push(def);
       const img = new Image();

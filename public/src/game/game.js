@@ -413,7 +413,18 @@ export class Game {
     const delay = this.viewmodel.startThrow();
     this.grenadeStock[kind] = 0;
     setTimeout(() => {
-      this.net.send({ t: 'grenade', kind, charge: 1 });
+      if (this.training) {
+        // Offline: fly it locally, and hand the cooldown back on a timer.
+        this.training.throwGrenade(kind, this.local);
+        this.grenadeCooldown = GRENADE_COOLDOWN;
+        clearTimeout(this._nadeCd);
+        this._nadeCd = setTimeout(() => {
+          this.grenadeCooldown = 0;
+          this.grenadeStock = { frag: 1, flash: 1, smoke: 1 };
+        }, GRENADE_COOLDOWN * 1000);
+      } else {
+        this.net.send({ t: 'grenade', kind, charge: 1 });
+      }
     }, delay * 1000);
     setTimeout(() => this.unequipGrenade(), 620);
   }
@@ -510,8 +521,15 @@ export class Game {
     this.local.spawn(start.p, start.yaw);
     this.equipViewmodel();
 
-    this.training = new TrainingMode(this.renderer.scene, this.lab, this.mapData, this.effects, this.audio);
+    this.local.offline = true;   // no server to finish reloads or fly grenades
+    this.training = new TrainingMode(
+      this.renderer.scene, this.lab, this.mapData, this.effects, this.audio, this.world
+    );
     this.training.build();
+    this.training.onEquip = (def) => {
+      this.equipViewmodel();
+      this.hud.toast(def.name, 1200);
+    };
 
     this.phase = PHASE.LIVE;
     this.phaseRemaining = Infinity;
@@ -583,6 +601,10 @@ export class Game {
       else if (this.equipGrenade(this.grenadeKind)) this.throwGrenade();
     }
     if (this.grenadeEquipped && input.takeMouseClick()) this.throwGrenade();
+
+    if (input.wasPressed('use') && this.training) {
+      if (this.training.takeNearbyWeapon(this.local)) this.audio.click();
+    }
 
     if (input.wasPressed('reload')) {
       if (this.grenadeEquipped) this.unequipGrenade();
@@ -695,7 +717,20 @@ export class Game {
       );
     }
 
-    if (this.training) this.training.update(dt, this.local, this.camera);
+    if (this.training) {
+      this.training.update(dt, this.local, this.camera);
+      // Offline: the grenades are flown here rather than by a host.
+      this.training.stepProjectiles(
+        dt,
+        (g) => this.grenadeView.sync([[g.id, g.kind, g.pos.x, g.pos.y, g.pos.z, g.fuse]]),
+        (g) => this.grenadeView.pop({ id: g.id, kind: g.kind, p: [g.pos.x, g.pos.y, g.pos.z] })
+      );
+      const stand = this.training.nearStand;
+      if (stand !== this._lastStand) {
+        this._lastStand = stand;
+        if (stand) this.hud.toast(`F — TAKE ${getWeapon(stand.weapon).name}`, 2500);
+      }
+    }
 
     // World, effects, listener.
     this.worldView?.update(dt, this.camera.position);

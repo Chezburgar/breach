@@ -529,8 +529,10 @@ export class ViewModel {
     rot.y += (SPRINT_ROT.y - rot.y) * this.sprintBlend;
     rot.z += SPRINT_ROT.z * this.sprintBlend;
 
-    // Sway, bob and landing dip all fade out while aiming.
-    const free = 1 - this.adsBlend * 0.82;
+    // Sway, bob and landing dip fade out completely while aiming. Leaving even
+    // a fraction in drifts the optic off the centre line, which is what put the
+    // receiver over the sight picture.
+    const free = Math.max(0, 1 - this.adsBlend * 1.15);
     pos.x += (this.sway.x + this.bob.x) * free;
     pos.y += (this.sway.y + this.bob.y) * free - s.landDip * 0.05;
     pos.z += this.bob.z * free;
@@ -623,10 +625,11 @@ export class ViewModel {
     this.holder.position.copy(pos);
     this.holder.rotation.copy(rot);
 
-    // Once a magnified optic is deployed the ocular fills the screen, so the
-    // weapon itself is hidden. Leaving it drawn puts the scope body and the
-    // rest of the gun on top of the very image you are meant to be looking
-    // through. Non-magnified sights stay visible — you shoot around them.
-    m.root.visible = !(m.magnification > 1.05 && this.adsBlend > 0.7);
+    // Aiming must never be obstructed by the gun. Magnified optics hand over to
+    // the ocular entirely; even a red dot has its receiver and rail sitting
+    // right under the sight line, so the whole weapon is dropped once the sight
+    // picture is established. The reticle is drawn by the HUD, not the model.
+    const deployed = this.adsBlend > (m.magnification > 1.05 ? 0.7 : 0.88);
+    m.root.visible = !deployed;
   }
 }

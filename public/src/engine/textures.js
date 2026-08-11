@@ -79,7 +79,7 @@ const PAINTERS = {
         const speck = noise(u * 26, v * 26, p * 26, 23) > 0.86 ? 1 : 0;
         const crack = turbulence(u * 0.8, v * 0.8, p, 77, 3);
         const dark = crack < 0.08 ? 0.55 : 1;
-        const g = (128 + n * 46 - speck * 26) * dark;
+        const g = (104 + n * 40 - speck * 24) * dark;
         rgb[i * 3] = g * 1.0; rgb[i * 3 + 1] = g * 1.0; rgb[i * 3 + 2] = g * 1.02;
         height[i] = n * 0.6 + (crack < 0.08 ? -0.35 : 0) + speck * 0.15;
         rough[i] = clamp01(0.82 + n * 0.14 - speck * 0.1);
@@ -90,7 +90,7 @@ const PAINTERS = {
 
   sandstone(ctx) {
     const { S, p, rgb, height, rough, metal } = ctx;
-    const base = hexToRgb(0xc9a97a);
+    const base = hexToRgb(0xa98d64);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const i = y * S + x;
@@ -111,7 +111,7 @@ const PAINTERS = {
 
   plaster(ctx) {
     const { S, p, rgb, height, rough, metal } = ctx;
-    const base = hexToRgb(0xd9d3c6);
+    const base = hexToRgb(0xb6b1a6);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const i = y * S + x;
@@ -214,7 +214,7 @@ const PAINTERS = {
   tile(ctx) {
     const { S, p, rgb, height, rough, metal } = ctx;
     const n8 = 6;
-    const palette = [0xd7cdbb, 0xcfc4ae, 0xc3b8a2, 0xd2c9b6, 0xb9ae98];
+    const palette = [0xb3ab9c, 0xaca291, 0xa29988, 0xafa795, 0x9a9182];
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const i = y * S + x;
@@ -249,7 +249,7 @@ const PAINTERS = {
         const u = (x / S) * p, v = (y / S) * p;
         const t = turbulence(u * 1.1, v * 1.1, p, 3, 5);
         const vein = Math.pow(1 - Math.abs(Math.sin((u + v) * 1.6 + t * 6)), 8);
-        const g = 226 - t * 30 - vein * 78;
+        const g = 186 - t * 30 - vein * 72;
         rgb[i * 3] = g; rgb[i * 3 + 1] = g * 0.99; rgb[i * 3 + 2] = g * 0.96;
         height[i] = t * 0.12;
         rough[i] = clamp01(0.24 + t * 0.2 + vein * 0.2);
@@ -344,7 +344,7 @@ const PAINTERS = {
 
   sand(ctx) {
     const { S, p, rgb, height, rough, metal } = ctx;
-    const base = hexToRgb(0xd0b98c);
+    const base = hexToRgb(0xae9a74);
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const i = y * S + x;
@@ -440,7 +440,7 @@ const PAINTERS = {
         const stone = noise(u * 44, v * 44, p * 44, 311);
         const clump = fbm(u * 6, v * 6, p, 313, 3);
         const t = 0.62 + stone * 0.5 + clump * 0.22;
-        rgb[i * 3] = 128 * t; rgb[i * 3 + 1] = 122 * t; rgb[i * 3 + 2] = 112 * t;
+        rgb[i * 3] = 106 * t; rgb[i * 3 + 1] = 101 * t; rgb[i * 3 + 2] = 93 * t;
         height[i] = stone * 0.85 + clump * 0.2;
         rough[i] = 0.95;
         metal[i] = 0;

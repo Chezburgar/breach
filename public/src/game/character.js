@@ -11,7 +11,10 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { PLAYER, TEAM_INFO } from '/shared/constants.js';
 import { clamp, damp } from '/shared/mathx.js';
 
-const MODEL_URL = '/assets/models/operator.fbx';
+// Resolved against this module rather than the site root: the game is served
+// from a subpath on GitHub Pages, where a leading slash points at the domain
+// root and quietly 404s.
+const MODEL_URL = new URL('../../assets/models/operator.fbx', import.meta.url).href;
 
 // Bone names in the supplied rig.
 const B = {
@@ -104,11 +107,20 @@ export class Operator {
   constructor(template, opts = {}) {
     this.root = cloneSkinned(template.object);
     this.root.traverse((o) => {
-      if (o.isMesh || o.isSkinnedMesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-        o.frustumCulled = false;
-        o.material = this.makeMaterial(o.material, opts);
+      if (!o.isMesh && !o.isSkinnedMesh) return;
+      // The operator is ~28k skinned vertices. Casting shadows would re-skin
+      // and redraw every one of them a second time per frame, for ten players —
+      // by far the most expensive thing in the frame, and barely visible.
+      o.castShadow = false;
+      o.receiveShadow = true;
+      o.material = this.makeMaterial(o.material, opts);
+
+      // Poses stay well inside this, so the mesh can be culled normally
+      // instead of being drawn even when it is behind the camera.
+      o.frustumCulled = true;
+      if (o.geometry) {
+        o.geometry.computeBoundingSphere();
+        if (o.geometry.boundingSphere) o.geometry.boundingSphere.radius *= 1.6;
       }
     });
 

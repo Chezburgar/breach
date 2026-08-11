@@ -11,11 +11,13 @@ export function buildTraining() {
     bounds: { min: [-84, -6, -84], max: [84, 30, 84] },
     ambience: 'day',
     offline: true,
-    sun: { azimuth: 210, elevation: 40, intensity: 1.9, color: 0xffeeda },
-    sky: { turbidity: 4.6, rayleigh: 1.3, mieCoefficient: 0.004, mieDirectionalG: 0.78 },
-    fog: { color: 0x8799aa, density: 0.0032 },
-    envIntensity: 0.085,
-    exposure: 0.26,
+    // Low turbidity and rayleigh keep the horizon from blowing out — looking
+    // from under the shelter into the sky was washing the whole range white.
+    sun: { azimuth: 210, elevation: 38, intensity: 1.5, color: 0xffeeda },
+    sky: { turbidity: 2.0, rayleigh: 0.75, mieCoefficient: 0.002, mieDirectionalG: 0.70 },
+    fog: { color: 0x6d7b8b, density: 0.0038 },
+    envIntensity: 0.07,
+    exposure: 0.21,
   });
 
   base(b);

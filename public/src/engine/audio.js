@@ -548,7 +548,10 @@ export class AudioEngine {
   // ----------------------------------------------------------- fanfares
   async loadFanfareManifest() {
     try {
-      const res = await fetch('/assets/fanfares/manifest.json', { cache: 'no-cache' });
+      // Resolved against this module — the game is served from a subpath on
+      // GitHub Pages, where a leading slash points at the domain root.
+      const base = new URL('../../assets/fanfares/', import.meta.url);
+      const res = await fetch(new URL('manifest.json', base), { cache: 'no-cache' });
       if (!res.ok) return;
       const data = await res.json();
       const list = Array.isArray(data) ? data : data.fanfares || [];
@@ -557,7 +560,7 @@ export class AudioEngine {
         .map((f) => ({
           id: f.id || `file_${f.file}`,
           name: f.name || f.file.replace(/\.[a-z0-9]+$/i, ''),
-          file: `/assets/fanfares/${f.file}`,
+          file: new URL(f.file, base).href,
         }));
     } catch {
       // No manifest — the built-in synthesised set is used.

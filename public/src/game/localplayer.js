@@ -224,8 +224,25 @@ export class LocalPlayer {
     const empty = w.mag === 0;
     const duration = empty ? w.rw.reloadEmpty : w.rw.reload;
     this.reloadUntil = this.time + duration;
+    this.pendingReload = { slot: this.slot, empty };
     this.events.push({ type: 'reload', duration, empty });
     return { duration, empty };
+  }
+
+  /**
+   * Complete a reload with no authority to do it for us. Online the server owns
+   * the magazine and its count arrives in the next snapshot; offline — the
+   * training ground — nothing would ever refill it.
+   */
+  finishReloadLocal() {
+    const info = this.pendingReload;
+    this.pendingReload = null;
+    if (!info) return;
+    const w = this.weapons[info.slot];
+    if (!w) return;
+    const take = Math.min(w.rw.mag - w.mag, w.reserve);
+    w.mag += take;
+    w.reserve -= take;
   }
 
   switchSlot(slot) {
@@ -299,6 +316,10 @@ export class LocalPlayer {
       }
     }
 
+    if (this.offline && this.pendingReload && this.time >= this.reloadUntil) {
+      this.finishReloadLocal();
+    }
+
     // Continuous, frame-rate dependent bits.
     this.bloom = Math.max(0, this.bloom - (this.rw?.spread.decay ?? 5) * dt);
     this.landDip = damp(this.landDip, 0, 9, dt);
@@ -367,17 +388,31 @@ export class LocalPlayer {
   // ---------------------------------------------------------------- camera
   updateCamera(camera, vmCamera, dt, scope) {
     const eye = eyePosition(this.state);
-    const lean = this.state.lean;
     const right = { x: Math.cos(this.yaw), y: 0, z: -Math.sin(this.yaw) };
 
+    // Leaning slides the camera sideways, which will happily push it through a
+    // wall and let you see into the next room. Sweep the offset and stop short
+    // of anything solid, then roll by however much lean actually survived.
+    const wanted = this.state.lean * MOVE.leanOffset;
+    let offset = wanted;
+    if (Math.abs(wanted) > 1e-3) {
+      const s = Math.sign(wanted);
+      const dir = { x: right.x * s, y: 0, z: right.z * s };
+      const clearance = PLAYER.radius * 0.6;
+      const hit = raycastWorld(this.world, eye, dir, Math.abs(wanted) + clearance);
+      if (hit) offset = s * Math.max(0, hit.t - clearance);
+    }
+    const leanFrac = MOVE.leanOffset > 1e-6 ? offset / MOVE.leanOffset : 0;
+
     camera.position.set(
-      eye.x + this.correction.x + right.x * lean * MOVE.leanOffset + this.viewBob.x,
+      eye.x + this.correction.x + right.x * offset + this.viewBob.x,
       eye.y + this.correction.y - this.landDip * 0.16 + this.viewBob.y,
-      eye.z + this.correction.z + right.z * lean * MOVE.leanOffset
+      eye.z + this.correction.z + right.z * offset
     );
 
     camera.rotation.order = 'YXZ';
-    camera.rotation.set(this.pitch, this.yaw, -lean * MOVE.leanAngle);
+    camera.rotation.set(this.pitch, this.yaw, -leanFrac * MOVE.leanAngle);
+    this.effectiveLean = leanFrac;
 
     // Field of view: sprint widens, aiming narrows to the optic's true zoom.
     const base = this.fov;
