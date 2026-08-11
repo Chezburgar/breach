@@ -1,0 +1,15 @@
+{
+  "fanfares": [
+    { "id": "ff_charge",        "name": "Charge",        "file": "charge.mp3" },
+    { "id": "ff_hardcore",      "name": "Hardcore",      "file": "hardcore.mp3" },
+    { "id": "ff_knockout",      "name": "Knockout",      "file": "knockout-ft-matt-pettineo-guitar.mp3" },
+    { "id": "ff_swing",         "name": "Swing",         "file": "swing.mp3" },
+    { "id": "ff_slowjam",       "name": "Slow Jam",      "file": "slow-jam.mp3" },
+    { "id": "ff_summersplash",  "name": "Summer Splash", "file": "summer-splash.mp3" },
+    { "id": "ff_8bit",          "name": "8-Bit",         "file": "8bit.mp3" },
+    { "id": "ff_crossedwires",  "name": "Crossed Wires", "file": "crossed-wires.mp3" },
+    { "id": "ff_teatime",       "name": "Teatime",       "file": "teatime.mp3" },
+    { "id": "ff_phantom",       "name": "The Phantom",   "file": "the-phantom.mp3" },
+    { "id": "ff_flamenco",      "name": "Flamenco",      "file": "flamenco.mp3" }
+  ]
+}
