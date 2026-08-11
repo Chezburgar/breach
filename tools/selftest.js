@@ -18,6 +18,59 @@ const ok = (cond, label, detail = '') => {
   else { failures++; console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`); }
 };
 
+/**
+ * Pairs of boxes whose faces land on the same plane where a player can see
+ * them. The depth buffer cannot choose between two surfaces it cannot tell
+ * apart, so the pair flickers as the camera moves — the "flashing floors and
+ * windows" class of bug. Faces buried below the ground or inside a floor slab
+ * are skipped: they never render, so they never flicker.
+ *
+ * Only reports patches big enough to notice; hairline seams between abutting
+ * trim are not worth chasing.
+ */
+const MIN_VISIBLE_AREA = 1.0;   // m²
+
+function coincidentFaces(md) {
+  const boxes = md.boxes.filter((b) => !b.r);   // yaw-free; rotated boxes rarely align
+  const lo = (b, a) => b.p[a] - b.s[a] / 2;
+  const hi = (b, a) => b.p[a] + b.s[a] / 2;
+  const name = (b) => `${b.m} [${b.s.map((v) => v.toFixed(1)).join('x')}]`;
+  const hits = [];
+
+  for (let i = 0; i < boxes.length; i++) {
+    const A = boxes[i];
+    for (let j = i + 1; j < boxes.length; j++) {
+      const B = boxes[j];
+      const ov = [];
+      let overlaps = true;
+      for (let a = 0; a < 3; a++) {
+        const o = Math.min(hi(A, a), hi(B, a)) - Math.max(lo(A, a), lo(B, a));
+        ov.push(o);
+        if (o <= 0.001) overlaps = false;
+      }
+      if (!overlaps) continue;
+
+      // One box wholly inside another is wasteful but does not flicker.
+      const holds = (P, Q) => [0, 1, 2].every((a) => lo(P, a) <= lo(Q, a) + 1e-4 && hi(P, a) >= hi(Q, a) - 1e-4);
+      if (holds(A, B) || holds(B, A)) continue;
+
+      for (let a = 0; a < 3; a++) {
+        const [p, q] = [0, 1, 2].filter((k) => k !== a);
+        const area = ov[p] * ov[q];
+        if (area < MIN_VISIBLE_AREA) continue;
+        if (Math.min(hi(A, 1), hi(B, 1)) < 0.02) continue;      // underground
+
+        for (const face of [[hi(A, a), hi(B, a)], [lo(A, a), lo(B, a)]]) {
+          if (Math.abs(face[0] - face[1]) >= 0.004) continue;
+          if (a === 1 && face[0] < 0.12) continue;              // inside a floor slab
+          hits.push({ axis: 'xyz'[a], plane: face[0], area, a: name(A), b: name(B) });
+        }
+      }
+    }
+  }
+  return hits.sort((x, y) => y.area - x.area);
+}
+
 // ---------------------------------------------------------------- geometry
 function checkMaps() {
   console.log('\nMAPS');
@@ -100,6 +153,11 @@ function checkMaps() {
         `${comps.length} components (largest ${comps[0]} of ${graph.nodes.length})`);
       ok(orphans === 0, `${id}: no isolated nav nodes`, `${orphans} orphans`);
     }
+
+    const zf = coincidentFaces(md);
+    ok(zf.length === 0, `${id}: no surfaces fighting for the same plane`,
+      zf.length ? `${zf.length} pairs, worst ${zf[0].area.toFixed(1)}m² at ` +
+        `${zf[0].axis}=${zf[0].plane.toFixed(2)} (${zf[0].a} / ${zf[0].b})` : '');
 
     console.log(`        ${md.boxes.length} boxes · ${md.spawns.length} spawns · ${md.props.length} props · ${graph.nodes.length} nav nodes`);
   }

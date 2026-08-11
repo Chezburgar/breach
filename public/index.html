@@ -155,23 +155,17 @@
       <div class="play-grid">
         <div class="modes" id="mode-list"></div>
         <aside class="play-side">
-          <div class="card party-card">
-            <h3>PARTY</h3>
-            <div id="party-body" class="party-body">
-              <p class="muted">Open a lobby and share the code, or join a friend's.</p>
-              <div class="row">
-                <button class="btn" id="party-create">CREATE LOBBY</button>
-              </div>
-              <div class="row">
-                <input id="party-code" class="input" maxlength="5" placeholder="CODE" />
-                <button class="btn" id="party-join">JOIN</button>
-              </div>
-            </div>
-          </div>
           <div class="card">
             <h3>PRIVATE MATCH</h3>
-            <p class="muted">Your own lobby with a code. Set the mode and fill it with bots.</p>
-            <button class="btn" id="private-create">CREATE PRIVATE MATCH</button>
+            <p class="muted">Your own lobby with a code. Set the mode, fill it with bots,
+              and start when everyone is in.</p>
+            <div class="row">
+              <button class="btn" id="private-create">CREATE PRIVATE MATCH</button>
+            </div>
+            <div class="row">
+              <input id="party-code" class="input" maxlength="5" placeholder="CODE" />
+              <button class="btn" id="party-join">JOIN</button>
+            </div>
           </div>
           <div class="card">
             <h3>TRAINING GROUND</h3>

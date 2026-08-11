@@ -13,6 +13,15 @@ const F0 = 0.09, F1 = 4.6, F2 = 9.2, ROOF = 13.8;
 const CELLAR = -4.6;
 // Vertical gap between layered outdoor surface patches.
 const PATCH_STEP = 0.012;
+
+// Walls run up to the roof line, so a deck laid flush with them puts two top
+// faces on the same plane and the eaves flicker all the way round the
+// building. Roofs are laid a few centimetres proud instead; the underside,
+// which is the interior ceiling, does not move.
+const ROOF_LIFT = 0.06;
+const roof = (b, x0, z0, x1, z1, y, t, m, holes) => (holes
+  ? b.slabHoles(x0, z0, x1, z1, y + ROOF_LIFT, t + ROOF_LIFT, m, holes)
+  : b.slab(x0, z0, x1, z1, y + ROOF_LIFT, t + ROOF_LIFT, m));
 // Interior floors clear the tallest patch stack by a comfortable margin.
 const FLOOR = 0.09;
 
@@ -82,7 +91,9 @@ function ground(b) {
   patch(-94, -94, 94, 94, 'grass');
   patch(-14, -88, 14, -50, 'gravel');          // the drive
   patch(-30, -50, 30, -26, 'stone');           // front court
-  patch(MX0, MZ0, MX1, MZ1, 'marble');         // manor ground floor
+  // No patch under the manor: its own ground floor is laid at F0, and a
+  // second marble slab five centimetres below only shows as a rim fighting
+  // the real floor's edge all the way round the building.
   patch(-70, -22, MX0, 22, 'stone');           // chapel terrace
   patch(MX1, -22, 70, 22, 'gravel');           // stable yard
   patch(-40, 24, 40, 58, 'stone');             // garden terrace
@@ -146,7 +157,7 @@ function gatehouse(b) {
     ]);
     b.slabHole(x0, Z - 7, x1, Z + 7, 4.4, 0.4, 'wood', [x0 + 0.6, Z - 5.6, x0 + 6.4, Z - 0.6]);
     switchback(b, x0 + 0.6, Z - 5.6, x0 + 6.4, Z - 0.6, 0, 4.4, 1, 'wood');
-    b.slab(x0, Z - 7, x1, Z + 7, H, 0.45, 'slate');
+    roof(b, x0, Z - 7, x1, Z + 7, H, 0.45, 'slate');
     parapet(b, x0, Z - 7, x1, Z + 7, H, 'stone', 1.1);
     b.prop('flag', x0 + 1.6, H, Z - 5.4, { scale: 1.1 });
   }
@@ -155,7 +166,9 @@ function gatehouse(b) {
   b.ext(-8, 0, Z - 1.4, -6.4, 9.6, Z + 1.4, 'stone');
   b.ext(6.4, 0, Z - 1.4, 8, 9.6, Z + 1.4, 'stone');
   b.ext(-8, 9.6, Z - 1.4, 8, 11.2, Z + 1.4, 'stone');
-  b.ext(-8, 6.2, Z - 0.3, 8, 9.6, Z + 0.3, 'stone', { solid: false, blocksSight: false });
+  // Spans the opening only. Running it into the piers puts its outer face on
+  // the same plane as theirs, and the arch flickers.
+  b.ext(-6.4, 6.2, Z - 0.3, 6.4, 9.6, Z + 0.3, 'stone', { solid: false, blocksSight: false });
 
   // Lodge huts flanking the drive, small and enterable.
   for (const sx of [-1, 1]) {
@@ -165,7 +178,7 @@ function gatehouse(b) {
     b.wall(cx - 5, -64, cx + 5, -64, 0, 3.4, 0.4, 'wood', [{ at: 5, width: 2.2, bottom: 1.0, top: 2.6, fill: 'glass' }]);
     b.wall(cx - 5, -74, cx - 5, -64, 0, 3.4, 0.4, 'wood', [{ at: 5, width: 2.0, bottom: 0, top: 2.5 }]);
     b.wall(cx + 5, -74, cx + 5, -64, 0, 3.4, 0.4, 'wood', [{ at: 5, width: 2.0, bottom: 1.0, top: 2.6, fill: 'glass' }]);
-    b.slab(cx - 5.4, -74.4, cx + 5.4, -63.6, 3.4, 0.5, 'slate');
+    roof(b, cx - 5.4, -74.4, cx + 5.4, -63.6, 3.4, 0.5, 'slate');
     b.prop('crate', cx - 3, 0, -71, { yaw: 0.4 });
     b.box([cx - 3, 0.6, -71], [1.18, 1.2, 1.18], 'crate', { r: 0.4 });
   }
@@ -182,14 +195,23 @@ function frontCourt(b) {
   b.ext(-6, 0, -44, 6, 0.55, -32, 'stone');
   b.box([0, 0.55, -38], [11.6, 1.1, 11.6], 'stone', { r: Math.PI / 4 });
   b.ext(-4.6, 1.05, -42.6, 4.6, 1.2, -33.4, 'water', { solid: false, blocksSight: false, water: true });
-  b.ext(-1.0, 1.05, -39, 1.0, 3.4, -37, 'marble');
+  b.ext(-1.0, 0.95, -39, 1.0, 3.4, -37, 'marble');
   b.ext(-1.8, 3.4, -39.8, 1.8, 3.8, -36.2, 'marble');
   b.prop('statue', 0, 3.8, -38);
 
   // Balustrade terrace and the steps up to the manor doors.
   b.slab(-30, -30, 30, -26, 1.2, 1.4, 'stone');
+  // Stepped plinth either side of the flight, rising towards the terrace.
+  // These courses used to sit in the stair opening itself and ran the wrong
+  // way, so anyone who walked into them landed in a trough between a 0.9 m
+  // face and the terrace lip — neither of which is a step you can take.
   for (let i = 0; i < 4; i++) {
-    b.ext(-9 + i * 0.0, 0, -30.2 - i * 0.55, 9, 0.3 + i * 0.3, -29.6 - i * 0.55, 'stone');
+    // Two centimetres under the terrace deck, so the top course does not end
+    // up coplanar with it where the two meet.
+    const h = 0.28 + i * 0.3;
+    const z0 = -31.85 + i * 0.55, z1 = -31.25 + i * 0.55;
+    b.ext(-30, 0, z0, -9, h, z1, 'stone');
+    b.ext(9, 0, z0, 30, h, z1, 'stone');
   }
   b.stairs(0, 0, -30.4, Math.PI, 4, 0.3, 0.55, 18, 'stone');
   b.railing(-30, -30, -9.5, -30, 1.2, 'stone', 1.05);
@@ -225,7 +247,7 @@ function manor(b) {
   b.slabHoles(MX0, MZ0, MX1, MZ1, F0, 0.6, 'marble', [STAIR_MANOR]);
   b.slabHoles(MX0, MZ0, MX1, MZ1, F1, 0.5, 'wood', [hallHole, westWell, eastWell]);
   b.slabHoles(MX0, MZ0, MX1, MZ1, F2, 0.5, 'wood', [westWell, eastWell]);
-  b.slabHoles(MX0, MZ0, MX1, MZ1, ROOF, 0.55, 'slate', [westWell, eastWell]);
+  roof(b, MX0, MZ0, MX1, MZ1, ROOF, 0.55, 'slate', [westWell, eastWell]);
 
   // --- exterior shell ---------------------------------------------------
   const winG = { bottom: 1.0, top: 3.2, fill: 'glass' };
@@ -281,7 +303,9 @@ function manor(b) {
 
   // Grand stair: a wide flight up to a half landing, then two returns.
   b.stairs(0, 0, 8.6, 0, 12, F1 / 2 / 12, 0.34, 7.0, 'marble');
-  b.slab(-3.6, 3.9, 3.6, 6.0, F1 / 2, 0.4, 'marble');
+  // The flight's top tread runs under this landing, so the landing is laid a
+  // centimetre and a half proud — level with it the two top faces flicker.
+  b.slab(-3.6, 3.9, 3.6, 6.0, F1 / 2 + 0.015, 0.415, 'marble');
   b.stairs(-5.6, F1 / 2, 6.0, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
   b.stairs(5.6, F1 / 2, 6.0, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
   b.railing(-3.6, 3.9, -3.6, 6.0, F1 / 2, 'wood');
@@ -409,7 +433,7 @@ function chapelWing(b) {
     { at: 18, width: 3.0, bottom: 4.4, top: 6.6 },
   ]);
 
-  b.slab(X0, Z0, X1, Z1, H, 0.5, 'slate');
+  roof(b, X0, Z0, X1, Z1, H, 0.5, 'slate');
   parapet(b, X0, Z0, X1, Z1, H, 'stone', 1.0);
 
   // Nave columns and pews.
@@ -424,7 +448,7 @@ function chapelWing(b) {
 
   // Choir gallery over the entrance — a strong angle down the nave. The stair
   // is entered from the nave side so it is not jammed against the end wall.
-  b.slab(X0 + 1, Z0 + 1, X1 - 1, Z0 + 9, 6.4, 0.4, 'wood');
+  b.slab(X0 + 1, Z0 + 1, X1 - 1, Z0 + 9, 6.46, 0.46, 'wood');
   b.railing(X0 + 1, Z0 + 9, X1 - 1, Z0 + 9, 6.4, 'wood', 1.05);
   switchback(b, X0 + 1.2, Z0 + 2.6, X0 + 7.2, Z0 + 8.4, 0, 6.4, 1, 'wood', 'metal', true);
 
@@ -438,7 +462,7 @@ function chapelWing(b) {
   b.wall(X0, TZ0, X0, TZ1, 0, 18, 0.5, 'stone',
     [{ at: 6, width: 2.6, bottom: 0, top: 3.0 },
      { at: 6, width: 2.4, bottom: 13.5, top: 17 }]);
-  b.slab(X0 - 6, TZ0, X0, TZ1, 18, 0.4, 'slate');
+  roof(b, X0 - 6, TZ0, X0, TZ1, 18, 0.4, 'slate');
 
   for (const [x, y, z] of [[-52, 7.4, -8], [-52, 7.4, 8]]) {
     b.prop('chandelier', x, y, z);
@@ -465,7 +489,7 @@ function stableWing(b) {
     { at: 18, width: 3.4, bottom: 0, top: 3.4 },
     { at: 8, width: 2.4, bottom: 4.2, top: 5.8 }, { at: 28, width: 2.4, bottom: 4.2, top: 5.8 },
   ]);
-  b.slab(X0, Z0, X1, Z1, H, 0.45, 'slate');
+  roof(b, X0, Z0, X1, Z1, H, 0.45, 'slate');
   parapet(b, X0, Z0, X1, Z1, H, 'estatewood', 0.9);
 
   // Hayloft: a partial upper deck overlooking the stalls and the yard door.
@@ -548,7 +572,7 @@ function gardens(b) {
       { at: at + 0.01, width: 8.0, bottom: 2.9, top: 4.4, fill: 'glass' },
     ]);
   }
-  b.slab(GX0, GZ0, GX1, GZ1, 4.6, 0.2, 'glass', { blocksSight: false });
+  b.slab(GX0, GZ0, GX1, GZ1, 4.66, 0.22, 'glass', { blocksSight: false });
   for (let i = 0; i < 4; i++) {
     b.ext(GX0 + 2, 0, GZ0 + 3 + i * 4, GX1 - 2, 0.9, GZ0 + 4.4 + i * 4, 'wood');
     b.prop('bush', GX0 + 5, 0.9, GZ0 + 3.7 + i * 4);
@@ -572,7 +596,7 @@ function gardens(b) {
   b.wall(OX0, OZ1, OX1, OZ1, 0, 5.2, 0.5, 'stone', [{ at: 12, width: 3.0, bottom: 0, top: 3.0 }]);
   b.wall(OX0, OZ0, OX0, OZ1, 0, 5.2, 0.5, 'stone', [{ at: 8, width: 3.0, bottom: 0, top: 3.0 }]);
   b.wall(OX1, OZ0, OX1, OZ1, 0, 5.2, 0.5, 'stone', [{ at: 8, width: 3.0, bottom: 0, top: 3.0 }]);
-  b.slab(OX0, OZ0, OX1, OZ1, 5.2, 0.4, 'slate');
+  roof(b, OX0, OZ0, OX1, OZ1, 5.2, 0.4, 'slate');
   parapet(b, OX0, OZ0, OX1, OZ1, 5.2, 'stone', 0.9);
   for (const [x, z] of [[OX0 + 6, OZ0 + 6], [OX1 - 6, OZ0 + 11]]) {
     b.box([x, 0.6, z], [1.18, 1.2, 1.18], 'crate');
@@ -627,8 +651,10 @@ function cellar(b) {
     const zStart = dir < 0 ? hole[3] : hole[1];
     b.stairs((hole[0] + hole[2]) / 2, Y, zStart, dir < 0 ? 0 : Math.PI,
       steps, Math.abs(Y) / steps, 0.32, 3.4, 'stone');
-    b.ext(hole[0] - 0.9, Y, hole[1], hole[0], 3.2, hole[3], 'stone');
-    b.ext(hole[2], Y, hole[1], hole[2] + 0.9, 3.2, hole[3], 'stone');
+    // Reach three centimetres into the opening: flush with the cut edge of
+    // the deck above, the wall face and that edge are the same plane.
+    b.ext(hole[0] - 0.9, Y, hole[1], hole[0] + 0.03, 3.2, hole[3], 'stone');
+    b.ext(hole[2] - 0.03, Y, hole[1], hole[2] + 0.9, 3.2, hole[3], 'stone');
     if (dir < 0) b.ext(hole[0] - 0.9, 0, hole[3], hole[2] + 0.9, 3.2, hole[3] + 0.7, 'stone');
     else b.ext(hole[0] - 0.9, 0, hole[1] - 0.7, hole[2] + 0.9, 3.2, hole[1], 'stone');
     b.railing(hole[0], hole[1], hole[0], hole[3], 0.02, 'metal');

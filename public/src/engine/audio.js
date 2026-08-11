@@ -590,8 +590,13 @@ export class AudioEngine {
   }
 
   /** Play a victory fanfare — a real audio file if one exists, else synth. */
+  /**
+   * Play a victory fanfare.
+   * @returns {Promise<number>} how long it runs, in seconds — callers use it
+   *   to clear whatever is on screen the moment the music stops.
+   */
   async playFanfare(id) {
-    if (!this.ready) return;
+    if (!this.ready) return 0;
     const file = this.fanfareFiles.find((f) => f.id === id);
     if (file) {
       try {
@@ -602,15 +607,16 @@ export class AudioEngine {
         g.gain.value = 1.0;
         src.connect(g); g.connect(this.music);
         src.start();
-        return;
+        return buf.duration;
       } catch {
         // Fall through to the synthesised version.
       }
     }
     const def = BUILTIN_FANFARES.find((f) => f.id === id) || BUILTIN_FANFARES[0];
-    this.synthFanfare(def);
+    return this.synthFanfare(def);
   }
 
+  /** @returns {number} seconds until the last note has decayed. */
   synthFanfare(def) {
     const t0 = this.ctx.currentTime + 0.05;
     const bus = this.ctx.createGain();
@@ -651,6 +657,10 @@ export class AudioEngine {
     tg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.6);
     th.connect(tg); tg.connect(bus);
     th.start(t0); th.stop(t0 + 0.7);
+
+    let end = 0.7;
+    for (const [at, , dur] of def.notes) end = Math.max(end, at + dur + 0.3);
+    return end + 0.05;
   }
 
   makeImpulse(seconds, decay) {

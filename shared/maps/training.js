@@ -102,8 +102,8 @@ function range(b) {
   b.ext(X0 - 2, 0, Z_END + 7, X1 + 2, 2.5, Z_END + 9, 'dirt');
 
   // Side walls so stray rounds stay on the range.
-  b.ext(X0 - 1.2, 0, Z_END, X0, 6, 34, 'concrete');
-  b.ext(X1, 0, Z_END, X1 + 1.2, 6, 34, 'concrete');
+  b.ext(X0 - 1.2, 0, Z_END - 0.4, X0, 6, 34, 'concrete');
+  b.ext(X1, 0, Z_END - 0.4, X1 + 1.2, 6, 34, 'concrete');
 
   // Static paper targets at each marked distance, seven lanes wide.
   let tid = 0;
@@ -205,19 +205,22 @@ function movementCourse(b) {
   }
 
   // Slide tunnel: a low overhang you can only get under while sliding.
-  b.ext(X0 + 16, 1.05, Z0 + 6, X0 + 30, 3.4, Z0 + 20, 'concrete');
+  b.ext(X0 + 16.6, 1.05, Z0 + 6, X0 + 29.4, 3.4, Z0 + 20, 'concrete');
   b.ext(X0 + 16, 0, Z0 + 6, X0 + 16.6, 3.4, Z0 + 20, 'concrete');
   b.ext(X0 + 29.4, 0, Z0 + 6, X0 + 30, 3.4, Z0 + 20, 'concrete');
   b.decal('sign_text', X0 + 23, 3.8, Z0 + 5.6, { text: 'SLIDE' });
 
-  // Gap jumps of increasing width. The stride has to clear the widest pair
-  // (2.4 + 4.7 + 2.4) or the last jump's landing pad grows into the next
-  // jump's take-off and the two platforms z-fight where they overlap.
+  // Gap jumps of increasing width, laid out with a running cursor. A fixed
+  // stride either runs each jump's landing pad into the next one's take-off
+  // or runs the whole set off the end of the course — both of which put two
+  // platforms in the same place, fighting over the same pixels.
+  let jz = Z0 + 29;                      // the ledge staircase ends at Z0 + 27.5
   for (let i = 0; i < 4; i++) {
-    const z = Z0 + 18 + i * 11;
-    b.ext(X0 + 4, 0, z, X0 + 12, 2.2, z + 2.4, 'concrete');
-    b.ext(X0 + 4, 0, z + 2.4 + (2.6 + i * 0.7), X0 + 12, 2.2, z + 4.8 + (2.6 + i * 0.7), 'concrete');
-    b.decal('sign_text', X0 + 8, 2.6, z + 1.0, { text: `${(2.6 + i * 0.7).toFixed(1)}m` });
+    const gap = 2.6 + i * 0.5;
+    b.ext(X0 + 4, 0, jz, X0 + 12, 2.2, jz + 2.4, 'concrete');
+    b.ext(X0 + 4, 0, jz + 2.4 + gap, X0 + 12, 2.2, jz + 4.8 + gap, 'concrete');
+    b.decal('sign_text', X0 + 8, 2.6, jz + 1.0, { text: `${gap.toFixed(1)}m` });
+    jz += 2.4 + gap + 2.4 + 0.6;         // 0.6 m of clear deck before the next
   }
 
   // Vault crates and a mantle wall.
@@ -241,7 +244,7 @@ function movementCourse(b) {
 function armory(b) {
   const X0 = -30, Z0 = 36, X1 = 30, Z1 = 50, H = 5.0;
   b.slab(X0, Z0, X1, Z1, FLOOR, 0.4, 'concrete');
-  b.slab(X0, Z0, X1, Z1, H, 0.4, 'metal');
+  b.slab(X0, Z0, X1, Z1, H + 0.06, 0.46, 'metal');
   b.wall(X0, Z0, X1, Z0, 0, H, 0.5, 'concrete', [{ at: 30, width: 6.0, bottom: 0, top: 3.4 }]);
   b.wall(X0, Z1, X1, Z1, 0, H, 0.5, 'concrete', []);
   b.wall(X0, Z0, X0, Z1, 0, H, 0.5, 'concrete', []);
@@ -292,7 +295,9 @@ function trainingMeta(b) {
     [64, 0, -14], [70, 0, -2], [68, 0, 14], [64, 0, 26], [46, 0, 12], [46, 0, -2],
     // Around the range's west wall to the movement course.
     [-31, 0, 33], [-37, 0, 33], [-40, 0, 24], [-40, 0, 10], [-40, 0, -4], [-40, 0, -16],
-    [-46, 0, 30], [-54, 0, 34], [-62, 0, 40], [-70, 0, 40],
+    // The last waypoint stands in the aisle beside the gap jumps, not on the
+    // lane itself — the platforms there are chest high.
+    [-46, 0, 30], [-54, 0, 34], [-62, 0, 40], [-62, 0, 30],
   ];
   for (const n of nodes) b.node(n[0], n[1], n[2]);
 }

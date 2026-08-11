@@ -441,10 +441,7 @@ export class Game {
     if (msg.victim.id === this.net.id) {
       this.hud.showDeath(msg);
       this.audio.hurt();
-      // Whoever put you down gets their fanfare played over the banner.
-      if (msg.killer?.fanfare) {
-        setTimeout(() => this.audio.playFanfare(msg.killer.fanfare), 260);
-      }
+      this.playKillerFanfare(msg.killer);
     } else if (msg.killer?.id === this.net.id) {
       this.hud.toast('ELIMINATED', 900);
     }
@@ -456,6 +453,27 @@ export class Game {
         { x: 0, y: 0.4, z: 0 }
       );
     }
+  }
+
+  /**
+   * Whoever put you down gets their fanfare played over their banner. The
+   * banner comes down when the music stops — you are dead for the rest of the
+   * round, and a card sitting over the middle of the screen is no way to
+   * spectate.
+   */
+  playKillerFanfare(killer) {
+    const MIN = 2.6;   // even with no fanfare, long enough to read the banner
+    if (!killer?.fanfare) return this.hud.autoHideDeath(MIN);
+
+    // A fallback in case the file never decodes; the real length replaces it.
+    this.hud.autoHideDeath(8);
+    const deadFor = this.deaths = (this.deaths || 0) + 1;
+    setTimeout(async () => {
+      const secs = await this.audio.playFanfare(killer.fanfare);
+      // A round may have restarted while the file was decoding.
+      if (this.deaths !== deadFor) return;
+      this.hud.autoHideDeath(Math.max(MIN, secs || 0));
+    }, 260);
   }
 
   onHurt(msg) {
@@ -896,6 +914,7 @@ export class Game {
       scopeMag: scope.mag,
       scopeTint: `#${(scope.tint ?? 0xff5540).toString(16).padStart(6, '0')}`,
       scopeReticle: scope.reticle,
+      weaponVisible: this.viewmodel.model?.root.visible !== false,
       pipActive: this.scope.active,
       scopeRadius: this.scope.radiusPx,
       sprintHide: l.state.sprinting && l.adsBlend < 0.1,

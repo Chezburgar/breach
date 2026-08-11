@@ -45,10 +45,13 @@ export class HUD {
     // Reticle: hip crosshair, or the optic reticle once aiming.
     const aiming = s.adsBlend > 0.6;
     const mag = s.scopeMag || 1;
-    if (aiming && s.scopeId !== 'iron' && mag < 2) {
+    // Irons normally need no reticle — you look over the weapon's own sights.
+    // With the weapon hidden there is nothing to look over, so draw one.
+    const ironsAlone = s.scopeId === 'iron' && !s.weaponVisible;
+    if (aiming && mag < 2 && (s.scopeId !== 'iron' || ironsAlone)) {
       drawOpticReticle(this.reticle, s.scopeId, { tint: s.scopeTint });
     } else if (aiming) {
-      // Magnified optic or irons: the sight itself is the aiming reference.
+      // Magnified optic or visible irons: the sight is the aiming reference.
       drawCrosshair(this.reticle, { hidden: true });
     } else {
       // Cone of fire in degrees converted to pixels at the current FOV.
@@ -354,13 +357,23 @@ export class HUD {
     screen.classList.remove('hidden');
   }
 
+  /** Take the banner down in `seconds`, so the dead player can spectate. */
+  autoHideDeath(seconds) {
+    clearTimeout(this.deathTimer);
+    this.deathTimer = setTimeout(() => this.hideDeath(), seconds * 1000);
+  }
+
   updateRespawn(seconds) {
     $('respawn-count').textContent = seconds > 0
       ? `RESPAWNING IN ${seconds.toFixed(1)}`
       : 'RESPAWNING…';
   }
 
-  hideDeath() { $('death-screen').classList.add('hidden'); }
+  hideDeath() {
+    clearTimeout(this.deathTimer);
+    this.deathTimer = null;
+    $('death-screen').classList.add('hidden');
+  }
 
   // ----------------------------------------------------------- intro cards
   showIntro(match, localId) {

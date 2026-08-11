@@ -147,6 +147,17 @@ export function drawOpticReticle(canvas, scopeId, opts = {}) {
       ctx.beginPath(); ctx.arc(c, c + 9, 1.3, 0, 7); ctx.fill();
       break;
 
+    // Only drawn when the weapon itself is hidden at full ADS — a bare post
+    // and ring standing in for the front sight you would otherwise look over.
+    case 'iron':
+      ctx.lineWidth = 1.4;
+      ctx.globalAlpha = 0.75;
+      ctx.beginPath(); ctx.arc(c, c, 9, 0, 7); ctx.stroke();
+      ctx.globalAlpha = 1;
+      line(ctx, c, c + 4, c, c + 11);
+      ctx.beginPath(); ctx.arc(c, c, 1.5, 0, 7); ctx.fill();
+      break;
+
     default:
       break;
   }
