@@ -694,9 +694,18 @@ function cellar(b) {
     b.ext(hole[2] - 0.03, 0, hole[1], hole[2] + 0.5, TOP, hole[3], 'stone');
 
     // The flight bottoms out at this end, so from the room above it is a
-    // four-metre drop — walled off up there. Below ground it must stay open:
-    // that opening is how the stairs meet the cellar at all.
+    // four-metre drop — walled off up there. It carries on down as a facing
+    // to just under the cellar vault, because the ground slabs are cut away
+    // over the shaft and their edges would otherwise show through it: a band
+    // of grass sitting on dirt, halfway up a stone wall. It stops at the
+    // vault, which is where the passage to the cellar has to stay open.
     const [bz0, bz1] = dir < 0 ? [hole[3], hole[3] + 0.7] : [hole[1] - 0.7, hole[1]];
+    // The facing oversails into the shaft by 20 cm. Started exactly on the
+    // cut plane it was coplanar with the very edges it is there to cover,
+    // and the two fought over the same pixels.
+    const fz0 = dir < 0 ? bz0 - 0.2 : bz0;
+    const fz1 = dir < 0 ? bz1 : bz1 + 0.2;
+    b.ext(hole[0] - 0.9, CTOP - 0.75, fz0, hole[2] + 0.9, 0, fz1, 'stone');
     b.ext(hole[0] - 0.5, 0, bz0, hole[2] + 0.5, TOP, bz1, 'stone');
   };
   shaft(STAIR_MANOR, -1);

@@ -36,9 +36,12 @@ function materials(shape) {
     dark: mat('dark', { color: 0x3a3e45, metalness: 0.38, roughness: 0.58, envMapIntensity: 0.7 }),
     steel: mat('steel', { color: 0x6f757c, metalness: 0.85, roughness: 0.36, envMapIntensity: 0.8 }),
     rubber: mat('rubber', { color: 0x1a1c1f, metalness: 0.05, roughness: 0.92 }),
+    // Sight glass, not swimming-pool glass. At 0x9fd8e8 and 42% opaque the
+    // whole picture through the optic came out blue and murky; a real coated
+    // lens takes a faint tint off the top and passes the rest.
     glass: mat('optglass', {
-      color: 0x9fd8e8, metalness: 0.1, roughness: 0.05,
-      transparent: true, opacity: 0.42, envMapIntensity: 2.4,
+      color: 0xdfeef4, metalness: 0.1, roughness: 0.04,
+      transparent: true, opacity: 0.13, envMapIntensity: 0.9,
     }),
     glove: mat('glove', { color: 0x2b2f36, metalness: 0.1, roughness: 0.85 }),
     skin: mat('skin', { color: 0x8d6449, metalness: 0.0, roughness: 0.8 }),
@@ -526,10 +529,13 @@ export class ViewModel {
     // The aim point is in model space, so the model's own scale has to be
     // folded in before it can be cancelled out in camera space.
     const aim = m.aimPoint.position;
+    // Sit the eye closer to the optic than arm's length: at 0.22 the sight
+    // was small in frame and you were looking at the weapon rather than
+    // through it.
     const adsPos = this._tmp.set(
       -aim.x * VM_SCALE,
       -aim.y * VM_SCALE,
-      -0.22 - aim.z * VM_SCALE
+      -0.15 - aim.z * VM_SCALE
     );
 
     const pos = new THREE.Vector3().copy(HIP).lerp(adsPos, this.adsBlend);
