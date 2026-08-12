@@ -21,9 +21,19 @@ function materials(shape) {
     // Gunmetal is dark. These were reflecting so much of the studio
     // environment that the receiver and the slide came out the same white as
     // the sky, which down the sights left nothing to aim with.
-    body: new THREE.MeshStandardMaterial({ color: shape.body ?? 0x2c2e33, metalness: 0.5, roughness: 0.52, envMapIntensity: 0.7 }),
-    furn: new THREE.MeshStandardMaterial({ color: shape.furn ?? 0x24262a, metalness: 0.15, roughness: 0.7, envMapIntensity: 0.6 }),
-    dark: mat('dark', { color: 0x1c1e22, metalness: 0.38, roughness: 0.6, envMapIntensity: 0.65 }),
+    // Authored near-black, which under any sane exposure renders as one flat
+    // silhouette with no readable parts. Lifted to something closer to what
+    // gunmetal actually photographs as, so the receiver, the furniture and
+    // the optic are three different things again.
+    body: new THREE.MeshStandardMaterial({
+      color: new THREE.Color(shape.body ?? 0x2c2e33).multiplyScalar(1.95),
+      metalness: 0.5, roughness: 0.5, envMapIntensity: 0.8,
+    }),
+    furn: new THREE.MeshStandardMaterial({
+      color: new THREE.Color(shape.furn ?? 0x24262a).multiplyScalar(1.85),
+      metalness: 0.15, roughness: 0.7, envMapIntensity: 0.65,
+    }),
+    dark: mat('dark', { color: 0x3a3e45, metalness: 0.38, roughness: 0.58, envMapIntensity: 0.7 }),
     steel: mat('steel', { color: 0x6f757c, metalness: 0.85, roughness: 0.36, envMapIntensity: 0.8 }),
     rubber: mat('rubber', { color: 0x1a1c1f, metalness: 0.05, roughness: 0.92 }),
     glass: mat('optglass', {
@@ -641,13 +651,14 @@ export class ViewModel {
     this.holder.position.copy(pos);
     this.holder.rotation.copy(rot);
 
-    // At full ADS the weapon is hidden and the sight picture stands on its
-    // own — drawing the gun puts the receiver and the optic body over the
-    // thing you are trying to look through. Sidearms are the exception: a
-    // pistol held at eye level *is* the sight picture, and hiding it looks
-    // broken. Sway is already zeroed at ADS, so nothing drifts over the
-    // centre line while it is up.
-    const sidearm = this.resolved?.cls === 'Sidearm';
-    m.root.visible = !(!sidearm && this.adsBlend > 0.7);
+    // Every weapon is looked *through*. Non-magnified optics are open
+    // housings, so the gun stays in hand and you sight over it exactly as
+    // you would with the pistol. Magnified optics are the one exception:
+    // there the picture-in-picture ocular replaces the view entirely, and
+    // drawing the weapon would only put the scope tube over the image you
+    // are looking through. Sway is zeroed at ADS, so nothing drifts across
+    // the centre line while the sight is up.
+    const magnified = (m.magnification || 1) > 1.05;
+    m.root.visible = !(magnified && this.adsBlend > 0.7);
   }
 }
