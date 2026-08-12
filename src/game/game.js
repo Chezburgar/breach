@@ -122,7 +122,7 @@ export class Game {
     net.on('hurt', (msg) => this.onHurt(msg));
     net.on('hitmark', (msg) => {
       this.hud.hit(msg.zone, msg.killed);
-      this.audio.hitmarker(msg.killed);
+      this.audio.hitmarker(msg.killed, msg.zone);
     });
     net.on('roster', (msg) => this.updateRoster(msg.players));
     net.on('playerleft', (msg) => this.remotes.remove(msg.id));
@@ -196,10 +196,6 @@ export class Game {
       document.getElementById('pause').classList.add('hidden');
       this.menu.show();
       document.querySelector('.tab[data-tab="settings"]').click();
-    });
-    document.getElementById('click-to-play').addEventListener('click', () => {
-      document.getElementById('click-to-play').classList.add('hidden');
-      this.input.requestLock();
     });
   }
 
@@ -370,6 +366,10 @@ export class Game {
       const n = { x: ev.n[0], y: ev.n[1], z: ev.n[2] };
       this.effects.impact(p, n, ev.m);
       this.audio.impact(ev.m, p);
+    } else if (ev.e === 'flesh') {
+      const p = { x: ev.p[0], y: ev.p[1], z: ev.p[2] };
+      this.audio.flesh(p, ev.z === 'head');
+      this.effects.blood(p, { x: 0, y: 0.3, z: 0 }, ev.z === 'head' ? 1.6 : 1);
     } else if (ev.e === 'gbounce') {
       this.audio.bounce({ x: ev.p[0], y: ev.p[1], z: ev.p[2] }, ev.s);
     }
@@ -441,7 +441,7 @@ export class Game {
 
     if (msg.victim.id === this.net.id) {
       this.hud.showDeath(msg);
-      this.audio.hurt();
+      this.audio.death();
       this.playKillerFanfare(msg.killer);
     } else if (msg.killer?.id === this.net.id) {
       this.hud.toast('ELIMINATED', 900);
@@ -449,10 +449,9 @@ export class Game {
 
     const victim = this.remotes.get(msg.victim.id);
     if (victim) {
-      this.effects.blood(
-        { x: victim.renderPos.x, y: victim.renderPos.y + 1.1, z: victim.renderPos.z },
-        { x: 0, y: 0.4, z: 0 }
-      );
+      const at = { x: victim.renderPos.x, y: victim.renderPos.y + 1.1, z: victim.renderPos.z };
+      this.effects.blood(at, { x: 0, y: 0.4, z: 0 }, 2.2);
+      this.audio.bodyfall(victim.renderPos);
     }
   }
 
@@ -534,7 +533,6 @@ export class Game {
     this.audio.stopIntroBed();
     this.input.releaseLock();
     document.getElementById('pause').classList.add('hidden');
-    document.getElementById('click-to-play').classList.add('hidden');
     this.menu.show();
     this.menu.restoreLobby(this.net.id);
     this.audio.startMenuMusic();
@@ -587,14 +585,25 @@ export class Game {
   }
 
   // --------------------------------------------------------------- input
+  /**
+   * Losing the pointer mid-match used to put a CLICK TO PLAY card on screen.
+   * There is no need to ask: arm a one-shot listener and take the pointer
+   * back on the player's next click, which is a gesture the browser accepts.
+   */
   onLockChange(locked) {
-    const hint = document.getElementById('click-to-play');
-    if (!this.inMatch) { hint.classList.add('hidden'); return; }
-    if (!locked && !this.paused && this.phase !== PHASE.OUTRO) {
-      hint.classList.remove('hidden');
-    } else {
-      hint.classList.add('hidden');
-    }
+    if (locked || !this.inMatch || this.paused || this.phase === PHASE.OUTRO) return;
+    this.armRelock();
+  }
+
+  armRelock() {
+    if (this._relockArmed) return;
+    this._relockArmed = true;
+    const grab = () => {
+      this._relockArmed = false;
+      window.removeEventListener('pointerdown', grab, true);
+      if (this.inMatch && !this.paused && this.phase !== PHASE.OUTRO) this.input.requestLock();
+    };
+    window.addEventListener('pointerdown', grab, true);
   }
 
   pause() {
@@ -602,7 +611,6 @@ export class Game {
     this.paused = true;
     this.input.releaseLock();
     document.getElementById('pause').classList.remove('hidden');
-    document.getElementById('click-to-play').classList.add('hidden');
   }
 
   resume() {

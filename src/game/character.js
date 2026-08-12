@@ -61,6 +61,13 @@ export function loadOperatorTemplate() {
         const holder = new THREE.Group();
         holder.name = 'operator';
         fbx.position.y -= fitted.min.y;
+        // The rig is authored facing +Z (shoulder_left sits at +X), but the
+        // controller's forward at yaw 0 is -Z. Left uncorrected every operator
+        // is turned a half circle from the way they are travelling, which is
+        // what made the bots look like they were walking backwards. Baked in
+        // here rather than at each call site; it sits above the bone hierarchy
+        // so the model-space pose maths is untouched.
+        fbx.rotation.y = Math.PI;
         holder.add(fbx);
 
         resolve({ object: holder, scale });
@@ -139,22 +146,60 @@ export class Operator {
   }
 
   /**
-   * Team colours are applied as a tint over whatever the FBX shipped with, so
-   * friend and foe stay readable at range.
+   * The model keeps the white-and-gold it was authored with — tinting the
+   * whole body toward the team colour threw away the texture and made every
+   * operator look like painted plastic.
+   *
+   * Team identity comes from a rim instead: the colour rides the edge of the
+   * silhouette, which is the part you actually see when someone is peeking a
+   * corner, and leaves the material alone everywhere else. Done in the shader
+   * rather than as an inverted hull because a second pass over 28k skinned
+   * vertices, ten times a frame, costs more than shadows did.
    */
   makeMaterial(src, opts) {
     const base = Array.isArray(src) ? src[0] : src;
-    const tint = opts.team >= 0 ? TEAM_INFO[opts.team].colorHex : 0x9aa3b0;
+    const tint = new THREE.Color(opts.team >= 0 ? TEAM_INFO[opts.team].colorHex : 0x9aa3b0);
+
     const mat = new THREE.MeshStandardMaterial({
-      color: base?.color ? base.color.clone() : new THREE.Color(0x8d939c),
+      color: base?.color ? base.color.clone() : new THREE.Color(0xffffff),
       map: base?.map || null,
-      roughness: 0.72,
-      metalness: 0.08,
-      skinning: true,
+      roughness: 0.58,
+      metalness: 0.25,       // enough for the gold to catch the light
     });
-    // Darken the base and push it toward the team colour.
-    mat.color.multiplyScalar(0.55).lerp(new THREE.Color(tint), 0.28);
-    mat.emissive = new THREE.Color(tint).multiplyScalar(0.05);
+    if (mat.map) {
+      mat.map.colorSpace = THREE.SRGBColorSpace;
+      mat.color.setScalar(1);   // let the texture speak for itself
+      // The estate is lit for dusk and the training range for dawn; under
+      // either, a character lit only by the scene falls to a black cut-out
+      // and the white-and-gold might as well not be there. A little self-lit
+      // texture keeps the material readable without flattening the shading.
+      mat.emissiveMap = mat.map;
+      mat.emissive = new THREE.Color(0xffffff);
+      mat.emissiveIntensity = 0.38;
+    }
+
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.teamTint = { value: tint };
+      // Enough to read the team off a silhouette at range, not so much that
+      // the operator becomes a coloured cut-out and the texture is gone.
+      shader.uniforms.rimStrength = { value: opts.enemy ? 0.30 : 0.20 };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+          uniform vec3 teamTint;
+          uniform float rimStrength;`)
+        .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+          {
+            // Facing ratio: 0 head-on, 1 at the silhouette edge.
+            vec3 vn = normalize(vNormal);
+            vec3 vv = normalize(vViewPosition);
+            float rim = 1.0 - abs(dot(vn, vv));
+            // A high exponent keeps it to the outer edge of the silhouette.
+            rim = pow(clamp(rim, 0.0, 1.0), 6.0);
+            gl_FragColor.rgb += teamTint * rim * rimStrength;
+          }`);
+    };
+    // Materials that compile differently must not share a program cache slot.
+    mat.customProgramCacheKey = () => `op_${opts.team}_${opts.enemy ? 1 : 0}`;
     return mat;
   }
 
@@ -259,20 +304,25 @@ export class Operator {
     }
 
     // --- torso ------------------------------------------------------------
-    const lean = 0.12 + stride * 0.16 + this.crouchBlend * 0.28;
-    this.rotate('root', 1, 0, 0, lean);
-    this.rotate('root', 0, 0, 1, -this.leanBlend * 0.28 + Math.sin(this.phase) * 0.03 * stride);
+    // The rig faces +Z, so a body leaning to its own right tips toward -X,
+    // which is a *positive* roll about +Z. `lean` is +1 for lean-right.
+    const stoop = 0.12 + stride * 0.16 + this.crouchBlend * 0.28;
+    this.rotate('root', 1, 0, 0, stoop);
+    this.rotate('root', 0, 0, 1, this.leanBlend * 0.42 + Math.sin(this.phase) * 0.03 * stride);
     this.rotate('root', 0, 1, 0, -swing * 0.07 * stride);
 
     // --- head: counter the torso so the eyes stay level, then apply pitch ---
-    this.rotate('neck', 1, 0, 0, -lean * 0.45);
-    this.rotate('head', 1, 0, 0, clamp(s.pitch || 0, -0.9, 0.9) - lean * 0.35);
+    // Engine pitch is positive looking up; a positive rotation about the rig's
+    // +X tips its face down, so the sign flips.
+    const pitch = -clamp(s.pitch || 0, -0.9, 0.9);
+    this.rotate('neck', 1, 0, 0, -stoop * 0.45);
+    this.rotate('head', 1, 0, 0, pitch - stoop * 0.35);
     this.rotate('head', 0, 1, 0, swing * 0.05 * stride);
 
     // --- arms -------------------------------------------------------------
     // Weapon-ready pose: both arms forward, right hand on the grip, left
     // supporting. Aiming tightens both in toward the centre line.
-    const readyPitch = -1.25 - this.aimBlend * 0.16 + clamp(s.pitch || 0, -0.9, 0.9) * 0.85;
+    const readyPitch = -1.25 - this.aimBlend * 0.16 + pitch * 0.85;
 
     this.rotate('shoulderR', 0, 1, 0, -0.12 - this.aimBlend * 0.12);
     this.rotate('armRTop', 1, 0, 0, readyPitch);

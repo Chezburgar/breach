@@ -18,10 +18,13 @@ function mat(name, params) {
 
 function materials(shape) {
   return {
-    body: new THREE.MeshStandardMaterial({ color: shape.body ?? 0x2c2e33, metalness: 0.55, roughness: 0.46, envMapIntensity: 1.5 }),
-    furn: new THREE.MeshStandardMaterial({ color: shape.furn ?? 0x24262a, metalness: 0.15, roughness: 0.66, envMapIntensity: 1.2 }),
-    dark: mat('dark', { color: 0x1c1e22, metalness: 0.4, roughness: 0.56, envMapIntensity: 1.4 }),
-    steel: mat('steel', { color: 0x9aa1a8, metalness: 0.9, roughness: 0.3, envMapIntensity: 1.6 }),
+    // Gunmetal is dark. These were reflecting so much of the studio
+    // environment that the receiver and the slide came out the same white as
+    // the sky, which down the sights left nothing to aim with.
+    body: new THREE.MeshStandardMaterial({ color: shape.body ?? 0x2c2e33, metalness: 0.5, roughness: 0.52, envMapIntensity: 0.7 }),
+    furn: new THREE.MeshStandardMaterial({ color: shape.furn ?? 0x24262a, metalness: 0.15, roughness: 0.7, envMapIntensity: 0.6 }),
+    dark: mat('dark', { color: 0x1c1e22, metalness: 0.38, roughness: 0.6, envMapIntensity: 0.65 }),
+    steel: mat('steel', { color: 0x6f757c, metalness: 0.85, roughness: 0.36, envMapIntensity: 0.8 }),
     rubber: mat('rubber', { color: 0x1a1c1f, metalness: 0.05, roughness: 0.92 }),
     glass: mat('optglass', {
       color: 0x9fd8e8, metalness: 0.1, roughness: 0.05,
@@ -86,16 +89,18 @@ function buildOptic(scopeId, M) {
     addMesh(g, cyl(radius * 0.94, radius * 0.94, 0.004, 16), M.glass, [0, height, -bodyLen / 2 + 0.004], [Math.PI / 2, 0, 0]);
     addMesh(g, cyl(radius * 0.94, radius * 0.94, 0.004, 16), M.glass, [0, height, bodyLen / 2 - 0.004], [Math.PI / 2, 0, 0]);
   } else {
-    // Open reflex / holo housing.
-    addMesh(g, box(0.042, 0.010, bodyLen), M.dark, [0, height - 0.021, 0]);
-    addMesh(g, box(0.042, 0.034, 0.008), M.dark, [0, height - 0.002, bodyLen / 2 - 0.004]);
-    addMesh(g, box(0.008, 0.034, bodyLen), M.dark, [-0.017, height - 0.002, 0]);
-    addMesh(g, box(0.008, 0.034, bodyLen), M.dark, [0.017, height - 0.002, 0]);
-    const glass = addMesh(g, box(0.030, 0.030, 0.003), M.glass, [0, height - 0.002, -bodyLen / 2 + 0.012]);
+    // Reflex and holographic sights are *open* at the back — you look through
+    // the front window and there is nothing behind it. A rear plate here was
+    // a solid slab sitting between the eye and the dot, which on a pistol is
+    // most of the screen. Only the hood, the rails and the window remain.
+    addMesh(g, box(0.038, 0.008, bodyLen), M.dark, [0, height - 0.021, 0]);
+    addMesh(g, box(0.006, 0.028, bodyLen * 0.86), M.dark, [-0.018, height - 0.004, 0.004]);
+    addMesh(g, box(0.006, 0.028, bodyLen * 0.86), M.dark, [0.018, height - 0.004, 0.004]);
+    // Hood over the top of the window, angled forward like a real shade.
+    addMesh(g, box(0.042, 0.005, 0.020), M.dark, [0, height + 0.013, -bodyLen / 2 + 0.012]);
+
+    const glass = addMesh(g, box(0.030, 0.026, 0.002), M.glass, [0, height - 0.002, -bodyLen / 2 + 0.012]);
     glass.rotation.x = scopeId === 'reflex' ? -0.18 : 0;
-    if (scopeId === 'holo') {
-      addMesh(g, box(0.030, 0.030, 0.003), M.glass, [0, height - 0.002, bodyLen / 2 - 0.014]);
-    }
   }
 
   return { group: g, aimHeight: height, length: bodyLen };
@@ -538,7 +543,18 @@ export class ViewModel {
     pos.z += this.bob.z * free;
     rot.x += this.sway.y * 1.4 * free;
     rot.y += this.sway.x * 1.4 * free;
-    rot.z += -this.sway.x * 2.0 * free + s.lean * 0.16;
+    rot.z += -this.sway.x * 2.0 * free;
+
+    // Lean. The camera has already rolled with the head; the weapon is held
+    // out in front of the chest, so it swings further than the eye does and
+    // arrives a moment later. Without this the gun is welded to the screen
+    // and the whole lean reads as the picture being tilted.
+    this.leanBlend = damp(this.leanBlend ?? 0, s.lean || 0, 9, dt);
+    const leanFree = 1 - this.adsBlend * 0.45;   // still visible down the sights
+    pos.x += this.leanBlend * 0.055 * leanFree;
+    pos.y -= Math.abs(this.leanBlend) * 0.022 * leanFree;
+    rot.z += this.leanBlend * 0.30 * leanFree;
+    rot.y += this.leanBlend * 0.05 * leanFree;
 
     // Recoil.
     pos.z += this.recoilPos.z * 0.06;

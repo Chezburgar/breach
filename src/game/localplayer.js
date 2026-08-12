@@ -404,6 +404,12 @@ export class LocalPlayer {
     }
     const leanFrac = MOVE.leanOffset > 1e-6 ? offset / MOVE.leanOffset : 0;
 
+    // A lean is a body movement, not a filter on the camera. Alongside the
+    // sideways slide and the roll, the head drops — you are pivoting about
+    // your waist, so going out to the side costs you height — and the whole
+    // thing eases rather than snapping to the key.
+    const leanDrop = Math.abs(leanFrac) * MOVE.leanDrop;
+
     // Step smoothing. The controller lifts the body onto a stair riser in a
     // single tick — correct for collision, but carried straight to the eye it
     // is a 20 cm jolt, five times a second, all the way up a flight. Hold the
@@ -422,11 +428,13 @@ export class LocalPlayer {
 
     camera.position.set(
       eye.x + this.correction.x + right.x * offset + this.viewBob.x,
-      eye.y + this.correction.y - this.stepLag - this.landDip * 0.16 + this.viewBob.y,
+      eye.y + this.correction.y - this.stepLag - this.landDip * 0.16 - leanDrop + this.viewBob.y,
       eye.z + this.correction.z + right.z * offset
     );
 
     camera.rotation.order = 'YXZ';
+    // Roll toward the side you are leaning to: leaning right drops your right
+    // ear toward your shoulder, which tips the horizon the other way.
     camera.rotation.set(this.pitch, this.yaw, -leanFrac * MOVE.leanAngle);
     this.effectiveLean = leanFrac;
 

@@ -40,8 +40,9 @@ export const MOVE = {
   maxFallSpeed: 55,
   coyoteTime: 0.11,       // grace period for jumping after leaving ground
   jumpBuffer: 0.14,       // grace period for pressing jump before landing
-  leanAngle: 0.42,        // radians
-  leanOffset: 0.42,       // metres the camera slides sideways when leaning
+  leanAngle: 0.30,        // radians of roll — a lean, not a barrel roll
+  leanOffset: 0.52,       // metres the camera slides sideways when leaning
+  leanDrop: 0.10,         // metres the head sinks: you pivot about the waist
   slideSpeed: 8.6,
   slideDuration: 0.62,
   slideCooldown: 0.85,

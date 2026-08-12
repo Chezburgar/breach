@@ -467,22 +467,139 @@ export class AudioEngine {
     }
   }
 
-  flesh(pos) {
+  /**
+   * A round going into a body. Three parts: the slap of the impact, a wet
+   * low thump behind it, and a short spray. One filtered noise burst read
+   * as a bag of sand being dropped.
+   */
+  flesh(pos, heavy = false) {
     if (!this.ready) return;
-    const sp = this.spatial(pos, 6, 60);
+    const sp = this.spatial(pos, 6, 70);
     if (!sp) return;
     const t = this.ctx.currentTime + sp.delay;
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.noise;
-    src.playbackRate.value = 0.5;
-    const f = this.ctx.createBiquadFilter();
-    f.type = 'lowpass'; f.frequency.value = 850;
-    const env = this.ctx.createGain();
-    env.gain.setValueAtTime(0.7, t);
-    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
-    src.connect(f); f.connect(env);
-    this.route(env, { spatial: sp, gain: 0.7 });
-    src.start(t); src.stop(t + 0.2);
+
+    // Slap: mid-band, very short.
+    const slap = this.ctx.createBufferSource();
+    slap.buffer = this.noise;
+    slap.playbackRate.value = 1.5 + Math.random() * 0.4;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = heavy ? 900 : 1400; bp.Q.value = 1.1;
+    const se = this.ctx.createGain();
+    se.gain.setValueAtTime(0.0001, t);
+    se.gain.exponentialRampToValueAtTime(0.85, t + 0.003);
+    se.gain.exponentialRampToValueAtTime(0.0001, t + 0.055);
+    slap.connect(bp); bp.connect(se);
+    this.route(se, { spatial: sp, gain: 0.62 });
+    slap.start(t); slap.stop(t + 0.09);
+
+    // Wet body: low, a touch longer, resonance dropping away.
+    const body = this.ctx.createBufferSource();
+    body.buffer = this.noise;
+    body.playbackRate.value = 0.42;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.Q.value = 2.2;
+    lp.frequency.setValueAtTime(680, t);
+    lp.frequency.exponentialRampToValueAtTime(180, t + 0.14);
+    const be = this.ctx.createGain();
+    be.gain.setValueAtTime(0.0001, t);
+    be.gain.exponentialRampToValueAtTime(heavy ? 0.9 : 0.6, t + 0.006);
+    be.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    body.connect(lp); lp.connect(be);
+    this.route(be, { spatial: sp, gain: 0.7 });
+    this.sendVerb(be, 0.2, sp);
+    body.start(t); body.stop(t + 0.24);
+
+    // Spray: a thin hiss trailing off.
+    const spray = this.ctx.createBufferSource();
+    spray.buffer = this.noise;
+    spray.playbackRate.value = 2.2;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 3200;
+    const pe = this.ctx.createGain();
+    pe.gain.setValueAtTime(0.0001, t + 0.008);
+    pe.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+    pe.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    spray.connect(hp); hp.connect(pe);
+    this.route(pe, { spatial: sp, gain: 0.5 });
+    spray.start(t + 0.008); spray.stop(t + 0.2);
+  }
+
+  /**
+   * Somebody going down near you: the body hitting the floor and their kit
+   * with it. Placed in the world, so it has a direction.
+   */
+  bodyfall(pos) {
+    if (!this.ready) return;
+    const sp = this.spatial(pos, 8, 70);
+    if (!sp) return;
+    const t = this.ctx.currentTime + sp.delay + 0.12;
+
+    const thud = this.ctx.createOscillator();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(110, t);
+    thud.frequency.exponentialRampToValueAtTime(38, t + 0.22);
+    const te = this.ctx.createGain();
+    te.gain.setValueAtTime(0.8, t);
+    te.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+    thud.connect(te);
+    this.route(te, { spatial: sp, gain: 0.7 });
+    this.sendVerb(te, 0.3, sp);
+    thud.start(t); thud.stop(t + 0.4);
+
+    // Gear rattle, twice, a beat apart.
+    for (const at of [0.02, 0.14]) {
+      const g = this.ctx.createBufferSource();
+      g.buffer = this.noise;
+      g.playbackRate.value = 2.4 + Math.random();
+      const bp2 = this.ctx.createBiquadFilter();
+      bp2.type = 'bandpass'; bp2.frequency.value = 2600; bp2.Q.value = 2.4;
+      const ge = this.ctx.createGain();
+      ge.gain.setValueAtTime(0.0001, t + at);
+      ge.gain.exponentialRampToValueAtTime(0.16, t + at + 0.01);
+      ge.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.12);
+      g.connect(bp2); bp2.connect(ge);
+      this.route(ge, { spatial: sp, gain: 0.5 });
+      g.start(t + at); g.stop(t + at + 0.16);
+    }
+  }
+
+  /**
+   * Your own death. Heard from inside your own head, so it is not spatial:
+   * the hit, everything going muffled, and a heartbeat falling away.
+   */
+  death() {
+    if (!this.ready) return;
+    const t = this.ctx.currentTime;
+
+    const hit = this.ctx.createBufferSource();
+    hit.buffer = this.noise;
+    hit.playbackRate.value = 0.5;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1400, t);
+    lp.frequency.exponentialRampToValueAtTime(150, t + 1.1);
+    const he = this.ctx.createGain();
+    he.gain.setValueAtTime(0.55, t);
+    he.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    hit.connect(lp); lp.connect(he);
+    this.route(he, { gain: 0.8 });
+    this.sendVerb(he, 0.5, null);
+    hit.start(t); hit.stop(t + 0.6);
+
+    for (let i = 0; i < 2; i++) {
+      const at = t + 0.18 + i * 0.62;
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(64 - i * 8, at);
+      o.frequency.exponentialRampToValueAtTime(30, at + 0.3);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.55 - i * 0.22, at + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.45);
+      o.connect(g);
+      this.route(g, { gain: 0.9 });
+      o.start(at); o.stop(at + 0.5);
+    }
   }
 
   footstep(surface = 'concrete', pos, running) {
@@ -552,19 +669,44 @@ export class AudioEngine {
     });
   }
 
-  hitmarker(killed) {
+  /**
+   * Confirmation that a round landed. A bare square-wave beep is a menu
+   * sound; this puts a click of contact under the tone, and a headshot gets
+   * a brighter, tighter one so you can tell them apart without looking.
+   */
+  hitmarker(killed, zone = 'body') {
     if (!this.ready) return;
     const t = this.ctx.currentTime;
+    const head = zone === 'head';
+
+    const c = this.ctx.createBufferSource();
+    c.buffer = this.noise;
+    c.playbackRate.value = head ? 3.4 : 2.6;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = head ? 4200 : 2800;
+    bp.Q.value = 1.6;
+    const ce = this.ctx.createGain();
+    ce.gain.setValueAtTime(head ? 0.22 : 0.15, t);
+    ce.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+    c.connect(bp); bp.connect(ce);
+    this.route(ce, { bus: 'ui', gain: 1 });
+    c.start(t); c.stop(t + 0.06);
+
     const o = this.ctx.createOscillator();
-    o.type = 'square';
-    o.frequency.setValueAtTime(killed ? 1180 : 1700, t);
-    if (killed) o.frequency.setValueAtTime(1560, t + 0.05);
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(killed ? 1180 : (head ? 2050 : 1700), t);
+    if (killed) {
+      o.frequency.setValueAtTime(1560, t + 0.05);
+      o.frequency.setValueAtTime(2080, t + 0.10);
+    }
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.13, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + (killed ? 0.16 : 0.07));
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(killed ? 0.16 : 0.11, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (killed ? 0.20 : 0.075));
     o.connect(g);
     this.route(g, { bus: 'ui', gain: 1 });
-    o.start(t); o.stop(t + 0.2);
+    o.start(t); o.stop(t + 0.25);
   }
 
   hurt() {
@@ -671,6 +813,30 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Hold the menu loop down for `seconds`, then bring it back. Used while a
+   * fanfare plays — two pieces of music at once is just noise.
+   */
+  duckMenuMusic(seconds) {
+    const m = this.menuMusic;
+    if (!m?.gain) return;
+    const t = this.ctx.currentTime;
+    clearTimeout(this._duckTimer);
+    try {
+      m.gain.gain.cancelScheduledValues(t);
+      m.gain.gain.setValueAtTime(Math.max(0.0001, m.gain.gain.value), t);
+      m.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    } catch { /* node already gone */ }
+    this._duckTimer = setTimeout(() => {
+      const cur = this.menuMusic;
+      if (!cur?.gain || cur !== m) return;
+      const t2 = this.ctx.currentTime;
+      cur.gain.gain.cancelScheduledValues(t2);
+      cur.gain.gain.setValueAtTime(0.0001, t2);
+      cur.gain.gain.exponentialRampToValueAtTime(0.55, t2 + 1.6);
+    }, Math.max(0, seconds - 0.4) * 1000);
+  }
+
   /** Duck the menu track out. Called when a match starts. */
   stopMenuMusic(fade = 0.8) {
     const m = this.menuMusic;
@@ -705,6 +871,9 @@ export class AudioEngine {
         g.gain.value = 1.0;
         src.connect(g); g.connect(this.music);
         src.start();
+        // Somebody's fanfare is the point of the moment — the menu loop gets
+        // out of its way and comes back when it finishes.
+        this.duckMenuMusic(buf.duration);
         return buf.duration;
       } catch {
         // Fall through to the synthesised version.

@@ -557,16 +557,35 @@ export class Effects {
     this.worldFlash.visible = false;
   }
 
-  blood(point, dir) {
-    for (let i = 0; i < 10; i++) {
+  /**
+   * Blood. Two populations, because one does not read: a fast fine mist that
+   * hangs for an instant and marks the hit, and heavier droplets that arc and
+   * fall. `scale` is 1 for a body hit, more for a headshot or a kill.
+   */
+  blood(point, dir, scale = 1) {
+    const mist = Math.round(8 * scale);
+    for (let i = 0; i < mist; i++) {
       this.spawnParticle({
         x: point.x, y: point.y, z: point.z,
-        vx: dir.x * (1 + Math.random() * 2.5) + (Math.random() - 0.5) * 1.4,
-        vy: dir.y * 1.2 + Math.random() * 1.4,
-        vz: dir.z * (1 + Math.random() * 2.5) + (Math.random() - 0.5) * 1.4,
-        life: 0.3 + Math.random() * 0.3,
-        r: 0.75, g: 0.05, b: 0.06,
-        size: 0.055, gravity: 1.4, drag: 0.9,
+        vx: dir.x * (1.5 + Math.random() * 3.5) + (Math.random() - 0.5) * 2.6,
+        vy: dir.y * 1.4 + Math.random() * 2.0,
+        vz: dir.z * (1.5 + Math.random() * 3.5) + (Math.random() - 0.5) * 2.6,
+        life: 0.16 + Math.random() * 0.18,
+        r: 0.62, g: 0.04, b: 0.05,
+        size: 0.03 + Math.random() * 0.025, gravity: 0.5, drag: 3.2,
+      });
+    }
+
+    const drops = Math.round(9 * scale);
+    for (let i = 0; i < drops; i++) {
+      this.spawnParticle({
+        x: point.x, y: point.y, z: point.z,
+        vx: dir.x * (1 + Math.random() * 2.2) + (Math.random() - 0.5) * 1.6,
+        vy: dir.y * 1.2 + Math.random() * 1.8,
+        vz: dir.z * (1 + Math.random() * 2.2) + (Math.random() - 0.5) * 1.6,
+        life: 0.45 + Math.random() * 0.5,
+        r: 0.44, g: 0.02, b: 0.03,
+        size: 0.05 + Math.random() * 0.045, gravity: 7.5, drag: 0.55,
       });
     }
   }
