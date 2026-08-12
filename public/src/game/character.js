@@ -14,7 +14,47 @@ import { clamp, damp } from '/shared/mathx.js';
 // Resolved against this module rather than the site root: the game is served
 // from a subpath on GitHub Pages, where a leading slash points at the domain
 // root and quietly 404s.
-const MODEL_URL = new URL('../../assets/models/operator.fbx', import.meta.url).href;
+const MODEL_DIR = new URL('../../assets/models/', import.meta.url).href;
+const MODEL_URL = `${MODEL_DIR}operator.fbx`;
+
+// The FBX does not embed its maps — it names them, and they have to sit
+// beside it. Without them three.js builds a texture with no image, the mesh
+// samples nothing, and every operator renders as a flat silhouette, which is
+// exactly what was happening. Loaded here explicitly rather than through the
+// FBX's own reference, because that path depends on how the exporter wrote
+// the relative filename and it had a folder prefix in front of it.
+const SKIN = {
+  color: 'Color_b32e675f-6421-4861-8965-0117541f4582.jpg',
+  normal: 'NormalGL_b32e675f-6421-4861-8965-0117541f4582.jpg',
+  // Occlusion / roughness / metalness packed into R / G / B.
+  orm: 'ORM_b32e675f-6421-4861-8965-0117541f4582.jpg',
+};
+
+/**
+ * Load whichever of the maps are actually present. Missing ones come back
+ * null and the material falls back to a plain finish rather than to black.
+ */
+async function loadSkin() {
+  const loader = new THREE.TextureLoader();
+  const get = (file, srgb) => new Promise((resolve) => {
+    loader.load(
+      MODEL_DIR + file,
+      (tex) => {
+        tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        tex.flipY = false;             // FBX UVs, same convention as glTF
+        tex.anisotropy = 4;
+        resolve(tex);
+      },
+      undefined,
+      () => resolve(null)
+    );
+  });
+
+  const [color, normal, orm] = await Promise.all([
+    get(SKIN.color, true), get(SKIN.normal, false), get(SKIN.orm, false),
+  ]);
+  return { color, normal, orm };
+}
 
 // Bone names in the supplied rig.
 const B = {
@@ -42,8 +82,11 @@ let templatePromise = null;
 /** Load the FBX once; every operator is a skeleton-aware clone of it. */
 export function loadOperatorTemplate() {
   if (templatePromise) return templatePromise;
+  const skinPromise = loadSkin();
   templatePromise = new Promise((resolve, reject) => {
-    new FBXLoader().load(
+    const loader = new FBXLoader();
+    loader.setResourcePath(MODEL_DIR);
+    loader.load(
       MODEL_URL,
       (fbx) => {
         // Normalise scale: exporters disagree wildly on units, so measure the
@@ -70,7 +113,7 @@ export function loadOperatorTemplate() {
         fbx.rotation.y = Math.PI;
         holder.add(fbx);
 
-        resolve({ object: holder, scale });
+        skinPromise.then((skin) => resolve({ object: holder, scale, skin }));
       },
       undefined,
       (err) => reject(err)
@@ -112,6 +155,7 @@ export class Operator {
    * @param {{team:number, enemy:boolean}} opts
    */
   constructor(template, opts = {}) {
+    this.skin = template.skin || {};
     this.root = cloneSkinned(template.object);
     this.root.traverse((o) => {
       if (!o.isMesh && !o.isSkinnedMesh) return;
@@ -160,43 +204,67 @@ export class Operator {
     const base = Array.isArray(src) ? src[0] : src;
     const tint = new THREE.Color(opts.team >= 0 ? TEAM_INFO[opts.team].colorHex : 0x9aa3b0);
 
+    // The FBX's own material carries a texture object with no image behind it,
+    // so it is ignored entirely; the maps come from `loadSkin`.
+    const skin = this.skin || {};
     const mat = new THREE.MeshStandardMaterial({
-      color: base?.color ? base.color.clone() : new THREE.Color(0xffffff),
-      map: base?.map || null,
+      color: new THREE.Color(0xffffff),
       roughness: 0.58,
-      metalness: 0.25,       // enough for the gold to catch the light
+      metalness: 0.2,
     });
-    if (mat.map) {
-      mat.map.colorSpace = THREE.SRGBColorSpace;
-      mat.color.setScalar(1);   // let the texture speak for itself
-      // The estate is lit for dusk and the training range for dawn; under
-      // either, a character lit only by the scene falls to a black cut-out
-      // and the white-and-gold might as well not be there. A little self-lit
-      // texture keeps the material readable without flattening the shading.
-      mat.emissiveMap = mat.map;
+
+    if (skin.color) {
+      mat.map = skin.color;
+      if (skin.normal) mat.normalMap = skin.normal;
+      if (skin.orm) {
+        // Occlusion in R, roughness in G, metalness in B — the glTF packing.
+        // The occlusion channel is left unused: three.js reads aoMap from a
+        // second UV set and this mesh only has one.
+        mat.roughnessMap = skin.orm;
+        mat.metalnessMap = skin.orm;
+        mat.roughness = 1.0;
+        mat.metalness = 1.0;
+      }
+      // The estate is lit for dusk and the range for dawn; under either, a
+      // character lit only by the scene falls to a cut-out and the white and
+      // gold might as well not be there. A touch of self-lit texture keeps
+      // the material readable without flattening the shading.
+      mat.emissiveMap = skin.color;
       mat.emissive = new THREE.Color(0xffffff);
-      mat.emissiveIntensity = 0.38;
+      mat.emissiveIntensity = 0.14;
+    } else {
+      // No maps on disk. A plain warm off-white is a poor substitute for the
+      // real thing, but it is a readable operator rather than a silhouette.
+      mat.color.setHex(0xd8d4cb);
+      mat.roughness = 0.5;
+      mat.metalness = 0.32;
     }
 
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.teamTint = { value: tint };
-      // Enough to read the team off a silhouette at range, not so much that
-      // the operator becomes a coloured cut-out and the texture is gone.
-      shader.uniforms.rimStrength = { value: opts.enemy ? 0.30 : 0.20 };
+      // A body is a narrow shape on screen, so a wide rim swallows it whole
+      // and the operator becomes a coloured cut-out. Tight and modest: an edge,
+      // not a coat of paint.
+      shader.uniforms.rimStrength = { value: opts.enemy ? 1.1 : 0.7 };
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>
           uniform vec3 teamTint;
           uniform float rimStrength;`)
-        .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+        // Added *before* tone mapping, in linear light. Added afterwards it
+        // lands in display space, where a fifth of a saturated colour is an
+        // enormous shift and washes the whole body — which is exactly what
+        // it was doing.
+        .replace('#include <tonemapping_fragment>', `
           {
             // Facing ratio: 0 head-on, 1 at the silhouette edge.
             vec3 vn = normalize(vNormal);
             vec3 vv = normalize(vViewPosition);
             float rim = 1.0 - abs(dot(vn, vv));
-            // A high exponent keeps it to the outer edge of the silhouette.
-            rim = pow(clamp(rim, 0.0, 1.0), 6.0);
+            // A high exponent keeps it to the outer edge and nowhere else.
+            rim = pow(clamp(rim, 0.0, 1.0), 12.0);
             gl_FragColor.rgb += teamTint * rim * rimStrength;
-          }`);
+          }
+          #include <tonemapping_fragment>`);
     };
     // Materials that compile differently must not share a program cache slot.
     mat.customProgramCacheKey = () => `op_${opts.team}_${opts.enemy ? 1 : 0}`;
