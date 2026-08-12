@@ -172,13 +172,17 @@ export class Renderer {
 
     // The view model gets its own rig so the weapon reads clearly whatever the
     // player is standing in — a gun lit only by the world goes black indoors.
-    this.vmKey = new THREE.DirectionalLight(0xfff2e0, 2.6);
+    // Bright enough to read indoors, not so bright that a gunmetal receiver
+    // clips to white — which is what was happening: the slide and the optic
+    // housing came out the same flat white as the sky and you could not tell
+    // one part of the weapon from another down the sights.
+    this.vmKey = new THREE.DirectionalLight(0xfff2e0, 1.5);
     this.vmKey.position.set(-0.6, 1.4, 0.9);
-    this.vmFill = new THREE.DirectionalLight(0x9fc4ff, 0.9);
+    this.vmFill = new THREE.DirectionalLight(0x9fc4ff, 0.5);
     this.vmFill.position.set(1.2, -0.4, -0.8);
-    this.vmRim = new THREE.DirectionalLight(0xffd9b0, 0.7);
+    this.vmRim = new THREE.DirectionalLight(0xffd9b0, 0.45);
     this.vmRim.position.set(0.4, 0.6, -1.2);
-    this.vmScene.add(this.vmKey, this.vmFill, this.vmRim, new THREE.AmbientLight(0xffffff, 0.32));
+    this.vmScene.add(this.vmKey, this.vmFill, this.vmRim, new THREE.AmbientLight(0xffffff, 0.16));
 
     // Gun finishes are largely metallic, and metal lit only by directional
     // lights renders black — it has almost no diffuse term and needs something
@@ -188,7 +192,7 @@ export class Renderer {
     this.vmEnvRT = this.pmrem.fromScene(room, 0.02);
     room.dispose?.();
     this.vmScene.environment = this.vmEnvRT.texture;
-    this.vmScene.environmentIntensity = 1.5;
+    this.vmScene.environmentIntensity = 0.55;
   }
 
   setShadowExtent(extent) {

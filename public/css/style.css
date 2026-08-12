@@ -657,12 +657,6 @@ h3 { font-size: 12px; color: var(--muted); }
 .toast.bad { border-color: var(--bad); color: #ffd7db; }
 @keyframes tin { from { opacity: 0; transform: translateY(10px); } }
 
-.click-hint {
-  position: fixed; inset: 0; display: grid; place-items: center;
-  font-size: 15px; letter-spacing: 0.4em; color: var(--muted);
-  background: rgba(4, 6, 10, 0.55); z-index: 19; cursor: pointer;
-}
-
 /* ------------------------------------------------------------ compact */
 @media (max-width: 1080px) {
   .play-grid, .loadout-grid, .profile-grid, .lobby-body { grid-template-columns: 1fr; }

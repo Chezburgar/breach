@@ -76,7 +76,10 @@ function range(b) {
 
   // Covered firing line.
   b.slab(X0, 16, X1, 34, ROOF, 0.4, 'metal');
-  for (let x = X0 + 2; x <= X1 - 2; x += 8) {
+  // Posts sit half a lane off the lane centres. On them, the middle post
+  // stood directly down lane four's line of fire and you could not see your
+  // own targets.
+  for (let x = -31.5; x <= 31.5; x += 9) {
     b.ext(x - 0.22, 0, 32.4, x + 0.22, ROOF, 32.8, 'metal');
     b.ext(x - 0.22, 0, 16.4, x + 0.22, ROOF, 16.8, 'metal');
   }
@@ -293,11 +296,11 @@ function trainingMeta(b) {
     [0, 0, 31], [-12, 0, 31], [12, 0, 31], [-24, 0, 31], [24, 0, 31],
     [0, 0, 35], [0, 0, 38], [0, 0, 44], [-14, 0, 44], [14, 0, 44], [-24, 0, 45], [24, 0, 45],
     // Around the range's east wall to the shoot house.
-    [31, 0, 33], [37, 0, 33], [37, 0, 24], [37, 0, 10], [37, 0, -5], [37, 0, -16],
+    [28, 0, 33], [37, 0, 33], [37, 0, 24], [37, 0, 10], [37, 0, -5], [37, 0, -16],
     [41, 0, -8], [42, 0, -18], [52, 0, 18], [52, 0, 2], [52, 0, -14], [56, 0, 22],
     [64, 0, -14], [70, 0, -2], [68, 0, 14], [64, 0, 26], [46, 0, 12], [46, 0, -2],
     // Around the range's west wall to the movement course.
-    [-31, 0, 33], [-37, 0, 33], [-40, 0, 24], [-40, 0, 10], [-40, 0, -4], [-40, 0, -16],
+    [-28, 0, 33], [-37, 0, 33], [-40, 0, 24], [-40, 0, 10], [-40, 0, -4], [-40, 0, -16],
     // The last waypoint stands in the aisle beside the gap jumps, not on the
     // lane itself — the platforms there are chest high.
     [-46, 0, 30], [-54, 0, 34], [-62, 0, 40], [-62, 0, 30],

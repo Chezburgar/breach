@@ -611,6 +611,11 @@ export class GameRoom {
       return { end, victim: null, damage: 0, zone: null, dist: bestT };
     }
 
+    // Everyone near the hit sees and hears it, not just the shooter — a round
+    // going into someone is the loudest thing in a fight and it had no world
+    // event at all.
+    this.pendingEvents.push({ e: 'flesh', p: r3(end), z: zone });
+
     const damage = damageAt(rw, bestT, HIT_MULTIPLIER[zone] || 1);
     return { end, victim, damage, zone, dist: bestT };
   }
