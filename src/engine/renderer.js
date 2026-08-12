@@ -12,6 +12,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
+// The exposure the view-model light rig is balanced for. Maps graded above
+// or below this scale the rig to compensate.
+const REFERENCE_EXPOSURE = 0.30;
+
 export const QUALITY_PRESETS = {
   low: {
     pixelRatio: 0.8, shadows: false, shadowMap: 1024, shadowExtent: 40,
@@ -182,7 +186,8 @@ export class Renderer {
     this.vmFill.position.set(1.2, -0.4, -0.8);
     this.vmRim = new THREE.DirectionalLight(0xffd9b0, 0.45);
     this.vmRim.position.set(0.4, 0.6, -1.2);
-    this.vmScene.add(this.vmKey, this.vmFill, this.vmRim, new THREE.AmbientLight(0xffffff, 0.16));
+    this.vmAmbient = new THREE.AmbientLight(0xffffff, 0.16);
+    this.vmScene.add(this.vmKey, this.vmFill, this.vmRim, this.vmAmbient);
 
     // Gun finishes are largely metallic, and metal lit only by directional
     // lights renders black — it has almost no diffuse term and needs something
@@ -249,7 +254,20 @@ export class Renderer {
     // its own studio lighting so the weapon reads the same everywhere.
     this.scene.environment = this.envRT.texture;
     this.scene.environmentIntensity = meta.envIntensity ?? 0.15;
-    this.renderer.toneMappingExposure = meta.exposure ?? 0.50;
+
+    const exposure = meta.exposure ?? 0.50;
+    this.renderer.toneMappingExposure = exposure;
+
+    // Tone mapping is global, so a map graded for dusk drags the weapon down
+    // with the world and one graded brighter blows it out. The view model has
+    // its own rig precisely so it reads the same everywhere — scale that rig
+    // against the map's exposure and it actually does.
+    const k = REFERENCE_EXPOSURE / Math.max(0.05, exposure);
+    this.vmKey.intensity = 1.9 * k;
+    this.vmFill.intensity = 0.62 * k;
+    this.vmRim.intensity = 0.55 * k;
+    this.vmAmbient.intensity = 0.20 * k;
+    this.vmScene.environmentIntensity = 0.7 * k;
   }
 
   /** Keep the shadow frustum tight around the viewer and snapped to texels. */

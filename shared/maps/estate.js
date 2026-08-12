@@ -299,10 +299,17 @@ function manor(b) {
     for (const z of [-12, -1, 10]) b.pillar(x, z, 0, F1 - 0.5, 0.42, 'marble', 'stone');
     for (const z of [-12, -1, 10]) b.pillar(x, z, F1, F2 - 0.5, 0.36, 'marble', 'stone');
   }
-  b.railing(-13, -12, -13, 10, F1, 'wood', 1.05);
-  b.railing(13, -12, 13, 10, F1, 'wood', 1.05);
+  // Railings guard the edge of the void and nothing else. Run round a
+  // rectangle two metres deeper than the hole they were, they fenced the top
+  // of the grand stair into a pocket — you could climb to the first floor and
+  // then not set foot on it. The south run is broken where the two returns
+  // come up through it.
+  b.railing(-13, -12, -13, 8, F1, 'wood', 1.05);
+  b.railing(13, -12, 13, 8, F1, 'wood', 1.05);
   b.railing(-13, -12, 13, -12, F1, 'wood', 1.05);
-  b.railing(-13, 10, 13, 10, F1, 'wood', 1.05);
+  b.railing(-13, 8, -7.6, 8, F1, 'wood', 1.05);
+  b.railing(-3.6, 8, 3.6, 8, F1, 'wood', 1.05);
+  b.railing(7.6, 8, 13, 8, F1, 'wood', 1.05);
 
   // Grand stair: a wide flight up to a half landing, then two returns.
   // Twelve treads of 0.34 carry the flight from z 8.6 to z 4.52, so that is
@@ -674,14 +681,23 @@ function cellar(b) {
     const zStart = dir < 0 ? hole[3] : hole[1];
     b.stairs((hole[0] + hole[2]) / 2, Y, zStart, dir < 0 ? 0 : Math.PI,
       steps, Math.abs(Y) / steps, 0.32, 3.4, 'stone');
-    // Reach three centimetres into the opening: flush with the cut edge of
-    // the deck above, the wall face and that edge are the same plane.
-    b.ext(hole[0] - 0.9, Y, hole[1], hole[0] + 0.03, 3.2, hole[3], 'stone');
-    b.ext(hole[2] - 0.03, Y, hole[1], hole[2] + 0.9, 3.2, hole[3], 'stone');
-    if (dir < 0) b.ext(hole[0] - 0.9, 0, hole[3], hole[2] + 0.9, 3.2, hole[3] + 0.7, 'stone');
-    else b.ext(hole[0] - 0.9, 0, hole[1] - 0.7, hole[2] + 0.9, 3.2, hole[1], 'stone');
-    b.railing(hole[0], hole[1], hole[0], hole[3], 0.02, 'metal');
-    b.railing(hole[2], hole[1], hole[2], hole[3], 0.02, 'metal');
+    // Below ground the sides are the shaft lining, and they reach three
+    // centimetres into the opening: flush with the cut edge of the deck above,
+    // the wall face and that edge are the same plane. Above ground they drop
+    // to a parapet. Carried full height they turned the head of the stairs
+    // into a roofless stone box in the middle of the great hall, which is
+    // both an eyesore and somewhere to get wedged.
+    const TOP = 1.15;
+    b.ext(hole[0] - 0.9, Y, hole[1], hole[0] + 0.03, 0, hole[3], 'stone');
+    b.ext(hole[2] - 0.03, Y, hole[1], hole[2] + 0.9, 0, hole[3], 'stone');
+    b.ext(hole[0] - 0.5, 0, hole[1], hole[0] + 0.03, TOP, hole[3], 'stone');
+    b.ext(hole[2] - 0.03, 0, hole[1], hole[2] + 0.5, TOP, hole[3], 'stone');
+
+    // The flight bottoms out at this end, so from the room above it is a
+    // four-metre drop — walled off up there. Below ground it must stay open:
+    // that opening is how the stairs meet the cellar at all.
+    const [bz0, bz1] = dir < 0 ? [hole[3], hole[3] + 0.7] : [hole[1] - 0.7, hole[1]];
+    b.ext(hole[0] - 0.5, 0, bz0, hole[2] + 0.5, TOP, bz1, 'stone');
   };
   shaft(STAIR_MANOR, -1);
   shaft(STAIR_GROTTO, 1);
