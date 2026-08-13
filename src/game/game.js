@@ -159,9 +159,7 @@ export class Game {
     });
     net.on('grenade.pop', (msg) => this.grenadeView.pop(msg));
     net.on('grenade.used', (msg) => {
-      this.grenadeStock[msg.kind] = 0;
       this.grenadeCooldown = msg.cooldown;
-      this.selectNextGrenade();
     });
     net.on('flashed', (msg) => {
       this.blindUntil = performance.now() / 1000 + msg.duration;
@@ -380,17 +378,17 @@ export class Game {
     return `${TEAM_INFO[0].name} ${scores[0]}  —  ${scores[1]} ${TEAM_INFO[1].name}   ·   FIRST TO ${need}`;
   }
 
-  selectNextGrenade() {
-    if (this.grenadeStock[this.grenadeKind]) return;
-    const next = GRENADE_IDS.find((k) => this.grenadeStock[k]);
-    if (next) this.grenadeKind = next;
-  }
+  /**
+   * Throwables are not consumable — the cooldown is the whole limit — so the
+   * only reason to change kind is because the player asked to.
+   */
+  selectNextGrenade() {}
 
   /** Take a throwable in hand. Returns false if there is none to take. */
   equipGrenade(kind) {
     if (!this.local?.alive || this.paused) return false;
     if (!GRENADE_IDS.includes(kind)) return false;
-    if (!this.grenadeStock[kind] || this.grenadeCooldown > 0) {
+    if (this.grenadeCooldown > 0) {
       this.audio.click('error');
       return false;
     }
@@ -413,21 +411,16 @@ export class Game {
     if (!this.local?.alive || !this.grenadeEquipped) return;
     if (this.grenadeCooldown > 0) return this.audio.click('error');
     const kind = this.grenadeEquipped;
-    if (!this.grenadeStock[kind]) return this.audio.click('error');
 
     // The animation winds up before the grenade leaves the hand.
     const delay = this.viewmodel.startThrow();
-    this.grenadeStock[kind] = 0;
     setTimeout(() => {
       if (this.training) {
         // Offline: fly it locally, and hand the cooldown back on a timer.
         this.training.throwGrenade(kind, this.local);
         this.grenadeCooldown = GRENADE_COOLDOWN;
         clearTimeout(this._nadeCd);
-        this._nadeCd = setTimeout(() => {
-          this.grenadeCooldown = 0;
-          this.grenadeStock = { frag: 1, flash: 1, smoke: 1 };
-        }, GRENADE_COOLDOWN * 1000);
+        this._nadeCd = setTimeout(() => { this.grenadeCooldown = 0; }, GRENADE_COOLDOWN * 1000);
       } else {
         this.net.send({ t: 'grenade', kind, charge: 1 });
       }
