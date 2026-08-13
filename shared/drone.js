@@ -36,7 +36,7 @@ export const DRONE = {
   scanRange: 34,
   scanCooldown: 2.2,
   scanArc: 0.28,          // radians off the drone's centre line
-  markDuration: 9.0,
+  markDuration: 20.0,
 
   deployRange: 1.6,       // how far in front of the operator it lands
 };
