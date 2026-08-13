@@ -10,6 +10,7 @@ import { FIXED_DT, PLAYER, BTN, MOVE } from '../shared/constants.js';
 import { MODE_IDS, MODES } from '../shared/modes.js';
 import { WEAPON_LIST, resolveWeapon, recoilAt, currentSpread } from '../shared/weapons.js';
 import { GameRoom } from '../shared/sim/room.js';
+import { DRONE } from '../shared/drone.js';
 import { buildNavGraph } from '../shared/sim/nav.js';
 
 let failures = 0;
@@ -341,9 +342,73 @@ function checkMatches() {
 }
 
 console.log('BREACH — self test');
+
+// ------------------------------------------------------------------ drone
+function checkDrone() {
+  console.log('\nRECON DRONE');
+  const hub = { send: () => {}, destroyRoom: () => {} };
+  const room = new GameRoom(hub, { id: 'D', mode: 'breach', mapId: 'estate', isPrivate: true, botCount: 4 });
+  room.fillBots();
+  room.startRound();
+  room.phase = 'live';
+  room.phaseEnds = 1e9;
+  room.checkRoundEnd = () => {};
+
+  const ps = [...room.players.values()];
+  const pilot = ps[0];
+  pilot.client = { id: pilot.id, ws: { readyState: 1, send: () => {} }, deliver: () => {} };
+  pilot.bot.think = () => { pilot.cmd = { seq: 0, btn: 0, yaw: pilot.cmd.yaw, pitch: 0 }; };
+  const step = (n) => { for (let i = 0; i < n; i++) room.tick(FIXED_DT); };
+
+  const bodyAt = { ...pilot.state.pos };
+  room.onMessage(pilot.client, { t: 'drone.deploy' });
+  step(2);
+  ok(!!pilot.drone && pilot.piloting, 'drone: deploys and takes control');
+
+  const first = pilot.drone;
+  room.onMessage(pilot.client, { t: 'drone.deploy' });
+  ok(pilot.drone === first, 'drone: only one per round');
+
+  const from = { ...pilot.drone.pos };
+  room.onMessage(pilot.client, { t: 'drone.input', btn: BTN.FORWARD | BTN.SPRINT, yaw: pilot.drone.yaw, pitch: 0 });
+  step(90);
+  const rolled = Math.hypot(pilot.drone.pos.x - from.x, pilot.drone.pos.z - from.z);
+  ok(rolled > 3, 'drone: rolls under power', `${rolled.toFixed(1)}m in 0.75s`);
+
+  const groundY = pilot.drone.pos.y;
+  room.onMessage(pilot.client, { t: 'drone.input', btn: BTN.JUMP, yaw: pilot.drone.yaw, pitch: 0 });
+  step(8);
+  ok(pilot.drone.pos.y > groundY + 0.1, 'drone: jumps');
+  step(80);
+
+  const drift = Math.hypot(pilot.state.pos.x - bodyAt.x, pilot.state.pos.z - bodyAt.z);
+  ok(drift < 0.05, 'drone: the operator stays put while piloting', `${drift.toFixed(2)}m of drift`);
+
+  const enemy = ps.find((q) => q.team !== pilot.team && q.alive);
+  pilot.drone.pos = { x: enemy.state.pos.x, y: enemy.state.pos.y + 0.1, z: enemy.state.pos.z + 4 };
+  const yaw = Math.atan2(-(enemy.state.pos.x - pilot.drone.pos.x), -(enemy.state.pos.z - pilot.drone.pos.z));
+  room.onMessage(pilot.client, { t: 'drone.input', btn: 0, yaw, pitch: 0.15 });
+  step(2);
+  pilot.drone.scanReadyAt = 0;
+  room.onMessage(pilot.client, { t: 'drone.scan' });
+  ok(enemy.markedUntil > room.time, 'drone: a scan marks what it is looking at');
+  ok(room.marksFor(pilot.team).includes(enemy.id) && !room.marksFor(enemy.team).includes(enemy.id),
+    'drone: marks are visible to the pilot team only');
+
+  const shooter = ps.find((q) => q.team !== pilot.team && q.alive && q !== enemy) || enemy;
+  const d = pilot.drone;
+  const origin = { x: d.pos.x, y: d.pos.y + DRONE.height * 0.5, z: d.pos.z + 3 };
+  room.traceShot(shooter, origin, { x: 0, y: 0, z: -1 }, shooter.weapons.primary.rw, null);
+  ok(!pilot.drone && !pilot.piloting, 'drone: one round destroys it and returns the pilot');
+
+  room.startRound();
+  ok(!pilot.droneUsed && enemy.markedUntil === 0, 'drone: a new round hands it back and clears marks');
+  room.dispose();
+}
 checkMaps();
 checkWeapons();
 checkMatches();
+checkDrone();
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}\n`);
 process.exit(failures === 0 ? 0 : 1);

@@ -4,7 +4,7 @@ import {
   FIXED_DT, INTERP_DELAY, MATCH, MAX_ROLLBACK, PLAYER, SNAPSHOT_DT,
   BTN, HIT_MULTIPLIER, TEAM_INFO,
 } from '../constants.js';
-import { buildWorld, raycastWorld, rayPlayer, hasLineOfSight } from '../collision.js';
+import { buildWorld, raycastWorld, rayPlayer, raySphere, hasLineOfSight } from '../collision.js';
 import { createPlayerState, stepPlayer, eyePosition } from '../controller.js';
 import { getMap } from '../maps/index.js';
 import { zoneAt } from '../maps/builder.js';
@@ -16,6 +16,7 @@ import {
   GRENADE_COOLDOWN, GRENADE_GRAVITY, getGrenade, fragDamage, flashBlind,
 } from '../grenades.js';
 import { clamp, dirFromAngles, hashString, makeRng, vdist, vnorm, vsub } from '../mathx.js';
+import { DRONE, createDrone, stepDrone, droneEye, scanTarget } from '../drone.js';
 import { buildNavGraph } from './nav.js';
 import { Bot, BOT_NAMES } from './bots.js';
 
@@ -62,6 +63,7 @@ export class GameRoom {
     this.projectiles = [];
     this.smokes = [];
     this.projectileSeq = 0;
+    this.droneSeq = 0;
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -224,6 +226,11 @@ export class GameRoom {
       spectateTarget: null,
       grenades: { frag: 1, flash: 1, smoke: 1 },
       grenadeCooldown: 0,
+      drone: null,          // the machine, while it is alive
+      droneUsed: false,     // one per operator per round
+      piloting: false,      // driving it, body left standing
+      markedUntil: 0,       // painted by an enemy scan until this time
+      markedBy: -1,         // which team can see the mark
       zone: '',
       joinedAt: this.time,
     };
@@ -334,7 +341,11 @@ export class GameRoom {
       if (p.bot) p.bot.think(dt, live);
       if (!p.alive) continue;   // no respawns inside a round — you spectate
 
-      const cmd = this.nextCommand(p, frozen);
+      // Driving the drone leaves the body standing still and defenceless;
+      // the operator cannot be in two places at once.
+      const cmd = p.piloting
+        ? { seq: p.cmd.seq, btn: 0, yaw: p.cmd.yaw, pitch: p.cmd.pitch }
+        : this.nextCommand(p, frozen);
       stepPlayer(p.state, cmd, this.world, FIXED_DT);
 
       if (p.state.fallDamage > 0 && live) {
@@ -348,6 +359,7 @@ export class GameRoom {
       if (z !== p.zone) p.zone = z;
     }
 
+    this.stepDrones(dt, live);
     if (live) this.stepProjectiles(dt);
     if (this.smokes.length) {
       this.smokes = this.smokes.filter((s) => this.time < s.until);
@@ -596,6 +608,11 @@ export class GameRoom {
       if (r && r.t < bestT) { bestT = r.t; victim = other; zone = r.zone; }
     }
 
+    // A drone in the way eats the round before anything else does.
+    if (this.hitDrone(shooter, origin, dir, bestT)) {
+      return { end: origin, victim: null, damage: 0, zone: null, dist: 0 };
+    }
+
     const end = {
       x: origin.x + dir.x * bestT,
       y: origin.y + dir.y * bestT,
@@ -795,6 +812,144 @@ export class GameRoom {
       id: p.id, name: p.name, banner: p.banner, fanfare: p.fanfare,
       level: p.level, team: p.team, bot: !!p.bot,
     };
+  }
+
+
+  // ---------------------------------------------------------------- drones
+  /**
+   * Put the drone on the ground in front of the operator and hand them the
+   * controls. Their body stays exactly where it is and stays shootable —
+   * that is the whole cost of using it.
+   */
+  deployDrone(p) {
+    if (!p.alive || this.phase !== 'live') return;
+    if (p.droneUsed || p.drone) return;
+
+    const eye = eyePosition(p.state);
+    const dir = dirFromAngles(p.cmd.yaw, 0);
+    const at = {
+      x: eye.x + dir.x * DRONE.deployRange,
+      y: p.state.pos.y + 0.4,
+      z: eye.z + dir.z * DRONE.deployRange,
+    };
+    // Do not push it into a wall; drop it at the operator's feet instead.
+    const clear = raycastWorld(this.world, { x: eye.x, y: at.y, z: eye.z },
+      { x: dir.x, y: 0, z: dir.z }, DRONE.deployRange + DRONE.radius);
+    if (clear) { at.x = p.state.pos.x; at.z = p.state.pos.z; }
+
+    p.drone = createDrone(`d${++this.droneSeq}`, p, at, p.cmd.yaw);
+    p.droneUsed = true;
+    p.piloting = true;
+    this.send(p.client, { t: 'drone.start', id: p.drone.id, scanCooldown: DRONE.scanCooldown });
+    this.broadcast({ t: 'drone.spawn', id: p.drone.id, owner: p.id, team: p.team });
+  }
+
+  /** Destroy or recall it. byOwner distinguishes a recall from a kill. */
+  killDrone(p, byOwner) {
+    const d = p.drone;
+    p.piloting = false;
+    if (!d) return;
+    p.drone = null;
+    d.alive = false;
+    this.broadcast({
+      t: 'drone.down', id: d.id, owner: p.id,
+      p: [round2(d.pos.x), round2(d.pos.y), round2(d.pos.z)],
+      recalled: !!byOwner,
+    });
+    if (p.client) this.send(p.client, { t: 'drone.end', recalled: !!byOwner });
+  }
+
+  stepDrones(dt, live) {
+    for (const p of this.players.values()) {
+      const d = p.drone;
+      if (!d || !d.alive) continue;
+
+      // Its owner going down does not kill it, but nobody is driving, so it
+      // rolls to a stop and gives itself up shortly after.
+      if (!p.alive || !live) {
+        p.piloting = false;
+        d.cmd = { btn: 0, yaw: d.yaw, pitch: d.pitch };
+        d.idleSince = d.idleSince || this.time;
+        if (this.time - d.idleSince > DRONE.orphanLife) { this.killDrone(p, false); continue; }
+      } else {
+        d.idleSince = 0;
+      }
+      stepDrone(d, d.cmd, this.world, dt);
+    }
+  }
+
+  /**
+   * Paint whatever the drone is looking at. The mark is a team asset: it goes
+   * to everyone on the pilot's side, through walls, and expires on its own.
+   */
+  droneScan(p) {
+    const d = p.drone;
+    if (!d || !d.alive || !p.piloting || this.phase !== 'live') return;
+    if (this.time < d.scanReadyAt) return;
+    d.scanReadyAt = this.time + DRONE.scanCooldown;
+
+    const target = scanTarget(d, this.players.values(), this.world);
+    this.broadcast({
+      t: 'drone.scan', id: d.id, hit: !!target,
+      p: [round2(d.pos.x), round2(d.pos.y), round2(d.pos.z)],
+    });
+    if (!target) return;
+
+    target.markedUntil = this.time + DRONE.markDuration;
+    target.markedBy = p.team;
+    this.send(p.client, { t: 'drone.mark', id: target.id, name: target.name, duration: DRONE.markDuration });
+  }
+
+  /** Marks visible to a team, for the snapshot. */
+  marksFor(team) {
+    const out = [];
+    for (const q of this.players.values()) {
+      if (!q.alive || q.markedUntil <= this.time || q.markedBy !== team) continue;
+      out.push(q.id);
+    }
+    return out;
+  }
+
+  /** Drones as snapshot entities. */
+  droneSnapshot() {
+    const out = [];
+    for (const p of this.players.values()) {
+      const d = p.drone;
+      if (!d || !d.alive) continue;
+      out.push([
+        d.id, p.id, d.team,
+        round2(d.pos.x), round2(d.pos.y), round2(d.pos.z),
+        round3(d.yaw), round3(d.pitch),
+      ]);
+    }
+    return out;
+  }
+
+  /**
+   * A drone in the path of a shot. One round ends it, whatever hit it —
+   * it is a camera on wheels, not a vehicle.
+   * @returns {boolean} true if the shot was stopped by a drone
+   */
+  hitDrone(shooter, origin, dir, maxT) {
+    let best = null, bestT = maxT;
+    for (const p of this.players.values()) {
+      const d = p.drone;
+      if (!d || !d.alive) continue;
+      if (this.mode.teams && d.team === shooter.team && p.id !== shooter.id) continue;
+      const t = raySphere(
+        origin.x, origin.y, origin.z, dir.x, dir.y, dir.z,
+        d.pos.x, d.pos.y + DRONE.height * 0.5, d.pos.z, DRONE.radius * 1.35
+      );
+      if (t != null && t >= 0 && t < bestT) { bestT = t; best = p; }
+    }
+    if (!best) return false;
+    this.pendingEvents.push({
+      e: 'impact',
+      p: [round2(origin.x + dir.x * bestT), round2(origin.y + dir.y * bestT), round2(origin.z + dir.z * bestT)],
+      n: [-dir.x, -dir.y, -dir.z], m: 'metal', g: false,
+    });
+    this.killDrone(best, false);
+    return true;
   }
 
   // ------------------------------------------------------------- grenades
@@ -1030,6 +1185,12 @@ export class GameRoom {
   startRound() {
     this.roundNo++;
     this.lastRoundWinner = -1;
+    // A drone is a once-a-round asset, so the round is what gives it back.
+    for (const p of this.players.values()) {
+      this.killDrone(p, false);
+      p.droneUsed = false;
+      p.markedUntil = 0;
+    }
 
     // Everyone comes back, as a squad, at their team's spawn cluster.
     for (const team of [0, 1]) {
@@ -1200,6 +1361,7 @@ export class GameRoom {
     }
 
     const grenadeState = this.grenadeSnapshot();
+    const drones = this.droneSnapshot();
 
     for (const p of this.players.values()) {
       if (!p.client || p.client.ws.readyState !== 1) continue;
@@ -1238,6 +1400,9 @@ export class GameRoom {
         p: entities,
         ev: events,
         gr: grenadeState,
+        dr: drones,
+        mk: this.marksFor(p.team),
+        pilot: p.piloting ? (p.drone?.id || null) : null,
         sc: this.scores,
         alive: [this.aliveCount(0), this.aliveCount(1)],
         round: this.roundNo,
@@ -1270,6 +1435,19 @@ export class GameRoom {
       case 'switch': this.switchSlot(p, msg.slot); break;
       case 'melee': this.melee(p, p.cmd); break;
       case 'grenade': this.throwGrenade(p, msg.kind, msg.charge); break;
+      case 'drone.deploy': this.deployDrone(p); break;
+      case 'drone.recall': this.killDrone(p, true); break;
+      case 'drone.scan': this.droneScan(p); break;
+      case 'drone.input': {
+        const d = p.drone;
+        if (!d || !d.alive || !p.piloting) break;
+        d.cmd = {
+          btn: msg.btn | 0,
+          yaw: Number.isFinite(msg.yaw) ? msg.yaw : d.yaw,
+          pitch: Number.isFinite(msg.pitch) ? msg.pitch : d.pitch,
+        };
+        break;
+      }
       case 'spectate': {
         if (!p.alive) p.spectateTarget = this.pickSpectateTarget(p, p.spectateTarget);
         break;

@@ -20,6 +20,8 @@ import { ViewModel } from './viewmodel.js';
 import { ScopeRenderer } from './scope.js';
 import { TrainingMode } from './training.js';
 import { GrenadeView } from './grenades.js';
+import { DroneView, MarkView } from './drone.js';
+import { DRONE } from '/shared/drone.js';
 import { GRENADE_IDS, GRENADE_COOLDOWN, getGrenade } from '/shared/grenades.js';
 import { saveProfile } from '../ui/menu.js';
 
@@ -50,6 +52,8 @@ export class Game {
     this.scope = new ScopeRenderer(this.renderer, this.renderer.scene, this.vmCamera);
     this.remotes = new RemoteManager(this.renderer.scene);
     this.grenadeView = new GrenadeView(this.renderer.scene, this.effects, this.audio);
+    this.droneView = new DroneView(this.renderer.scene);
+    this.markView = new MarkView(this.renderer.scene);
 
     this.grenadeKind = 'frag';
     this.grenadeStock = { frag: 1, flash: 1, smoke: 1 };
@@ -58,6 +62,12 @@ export class Game {
     this.round = 0;
     this.aliveCounts = [0, 0];
     this.spectateId = null;
+    // Piloting: the drone's id while we are driving it, plus what the
+    // server says we own. `droneUsed` gates the once-a-round deploy.
+    this.pilotId = null;
+    this.droneUsed = false;
+    this.droneScanReady = 0;
+    this.marks = [];
 
     this.input = new Input(canvas, profile.settings);
     this.input.onLockChange = (locked) => this.onLockChange(locked);
@@ -138,6 +148,8 @@ export class Game {
       this.round = msg.round;
       this.scores = msg.scores;
       this.grenadeView.clear();
+      this.droneUsed = false;
+      this.pilotId = null;
       this.hud.hideDeath();
       this.hud.roundBanner(`ROUND ${msg.round}`, this.roundSubtitle(msg.scores), 2200);
       this.audio.countdownBeep(false);
@@ -165,6 +177,33 @@ export class Game {
       this.blindUntil = performance.now() / 1000 + msg.duration;
       this.audio.tinnitus(msg.duration);
     });
+    net.on('drone.start', (msg) => {
+      this.pilotId = msg.id;
+      this.droneUsed = true;
+      this.droneScanReady = 0;
+      this.unequipGrenade();
+      this.hud.toast('DRONE DEPLOYED — Z TO RECALL', 2200);
+      this.audio.click('reload');
+    });
+    net.on('drone.end', (msg) => {
+      this.pilotId = null;
+      this.hud.toast(msg?.recalled ? 'DRONE RECALLED' : 'DRONE DESTROYED', 1800);
+      this.audio.click(msg?.recalled ? 'ui' : 'error');
+    });
+    net.on('drone.spawn', () => this.audio.click('ui'));
+    net.on('drone.down', (msg) => {
+      const at = { x: msg.p[0], y: msg.p[1], z: msg.p[2] };
+      if (!msg.recalled) {
+        this.effects.impact(at, { x: 0, y: 1, z: 0 }, 'metal');
+        this.audio.impact('metal', at);
+      }
+      this.droneView.remove(msg.id);
+    });
+    net.on('drone.scan', (msg) => {
+      this.droneScanReady = DRONE.scanCooldown;
+      this.audio.click(msg.hit ? 'ui' : 'dry');
+    });
+    net.on('drone.mark', (msg) => this.hud.streak(`${msg.name} MARKED`));
     net.on('match.end', (msg) => this.endMatch(msg));
     net.on('match.over', () => this.leaveMatch());
     // The host put a fresh match together — drop back to the waiting room.
@@ -347,6 +386,11 @@ export class Game {
       });
     }
 
+    this.droneRows = msg.dr || [];
+    this.marks = msg.mk || [];
+    // The server is the authority on whether we are still driving: losing
+    // the drone, dying, or the round ending all end it the same way.
+    if (this.pilotId && msg.pilot !== this.pilotId) this.pilotId = null;
     for (const ev of msg.ev || []) this.handleWorldEvent(ev);
   }
 
@@ -516,6 +560,10 @@ export class Game {
     this.local = null;
     this.disposeTraining();
     this.grenadeView.clear();
+    this.droneView.clear();
+    this.markView.clear();
+    this.pilotId = null;
+    this.droneUsed = false;
     this.remotes.clear();
     this.roster.clear();
     this.hud.hide();
@@ -638,6 +686,17 @@ export class Game {
 
     // Throwables are equipped like a weapon: pick one up, then throw it with
     // the fire button. `G` is a shortcut that equips and throws in one go.
+    // Drone. One per round; while it is out, Z brings it home.
+    if (input.wasPressed('drone')) {
+      if (this.pilotId) this.net.send({ t: 'drone.recall' });
+      else if (this.droneUsed) { this.audio.click('error'); this.hud.toast('DRONE SPENT', 1200); }
+      else this.net.send({ t: 'drone.deploy' });
+    }
+    // Everything below is the operator's body, which is not where we are.
+    if (this.pilotId) {
+      if (input.takeMouseClick() && this.droneScanReady <= 0) this.net.send({ t: 'drone.scan' });
+      return;
+    }
     if (input.wasPressed('nade1')) this.equipGrenade('frag');
     if (input.wasPressed('nade2')) this.equipGrenade('flash');
     if (input.wasPressed('nade3')) this.equipGrenade('smoke');
@@ -689,6 +748,46 @@ export class Game {
     if (input.wasPressed('inspect')) this.viewmodel.startInspect();
   }
 
+  /**
+   * Sit in the drone's camera head and steer it. Look input drives the
+   * drone's own yaw and pitch, movement keys go to the server as its
+   * command; the operator's body is frozen at the other end.
+   */
+  updateDroneCamera(dt) {
+    const d = this.droneView.get(this.pilotId);
+    this._droneYaw = this._droneYaw ?? this.local.yaw;
+    this._dronePitch = this._dronePitch ?? 0;
+
+    if (this.input.locked && !this.paused) {
+      const look = this.input.takeLook();
+      this._droneYaw -= look.x;
+      this._dronePitch = THREE.MathUtils.clamp(this._dronePitch - look.y, -0.9, 0.9);
+      const i = this.input;
+      let btn = 0;
+      if (i.isDown('forward')) btn |= 1;
+      if (i.isDown('back')) btn |= 2;
+      if (i.isDown('left')) btn |= 4;
+      if (i.isDown('right')) btn |= 8;
+      if (i.isDown('jump')) btn |= 16;
+      if (i.isDown('sprint')) btn |= 64;
+      this.net.send({ t: 'drone.input', btn, yaw: this._droneYaw, pitch: this._dronePitch });
+    }
+
+    // Follow the server's drone position, but look where the player is
+    // looking right now — turning has to feel local.
+    const at = d ? d.pos : this.local.state.pos;
+    this.camera.position.set(at.x, at.y + DRONE.eye, at.z);
+    this.camera.rotation.order = 'YXZ';
+    this.camera.rotation.set(this._dronePitch, this._droneYaw, 0);
+    // A drone camera is a wide, cheap lens.
+    if (Math.abs(this.camera.fov - 96) > 0.01) {
+      this.camera.fov = 96;
+      this.camera.updateProjectionMatrix();
+    }
+    this.vmCamera.position.copy(this.camera.position);
+    this.vmCamera.quaternion.copy(this.camera.quaternion);
+  }
+
   // ---------------------------------------------------------------- frame
   update(dt) {
     if (!this.inMatch || !this.local) return;
@@ -698,8 +797,8 @@ export class Game {
     const frozen = this.paused || this.phase === PHASE.INTRO ||
       this.phase === PHASE.WARMUP || this.phase === PHASE.OUTRO;
 
-    // Look.
-    if (this.input.locked && !this.paused && this.phase !== PHASE.OUTRO) {
+    // Look. While piloting this is the drone's, taken in updateDroneCamera.
+    if (this.input.locked && !this.paused && this.phase !== PHASE.OUTRO && !this.pilotId) {
       const look = this.input.takeLook();
       if (this.phase !== PHASE.INTRO) {
         const adsScale = this.local.adsBlend > 0.1
@@ -712,7 +811,7 @@ export class Game {
 
     // Simulate and send. A throwable in hand suppresses the trigger and the
     // sights — the fire button throws instead.
-    let buttons = (this.input.locked && !this.paused) ? this.input.buttons() : 0;
+    let buttons = (this.input.locked && !this.paused && !this.pilotId) ? this.input.buttons() : 0;
     if (this.grenadeEquipped) buttons &= ~(1 << 8 | 1 << 7);
     const cmds = this.local.step(dt, buttons, { frozen });
     if (cmds.length && this.net.connected) {
@@ -741,14 +840,21 @@ export class Game {
       landDip: this.local.landDip,
     });
 
-    if (this.local.alive || this.phase === PHASE.INTRO) {
+    if (this.pilotId) {
+      this.updateDroneCamera(dt);
+    } else if (this.local.alive || this.phase === PHASE.INTRO) {
       this.local.updateCamera(this.camera, this.vmCamera, dt, this.scope);
     } else {
       this.updateSpectatorCamera(dt);
     }
     this.scope.update(this.local.alive ? this.local.adsBlend : 0, this.camera, this.vmCamera, this.local.fov);
-    this.viewmodel.holder.visible = this.local.alive;
+    this.viewmodel.holder.visible = this.local.alive && !this.pilotId;
     this.grenadeView.update(dt);
+    this.droneScanReady = Math.max(0, this.droneScanReady - dt);
+    this.droneView.sync(this.droneRows, dt);
+    // Our own drone is hidden from us — we are sitting in its camera head.
+    if (this.pilotId) this.droneView.setHidden(this.pilotId, true);
+    this.markView.sync(this.marks, (id) => this.remotes.get(id)?.renderPos || null);
 
     this.processLocalEvents();
 
