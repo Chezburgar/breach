@@ -85,6 +85,7 @@ export class Session {
     this.pingSeq = 0;
     this.pending = new Map();
     this.pendingHello = null;
+    this.connectAttempt = null;   // connection attempt in flight
 
     // Host migration.
     this.slot = null;
@@ -94,6 +95,41 @@ export class Session {
     this.stateTimer = null;
     this.watchdog = null;
     this.lastHostAt = 0;
+  }
+
+  /**
+   * Run a connection attempt, refusing to start a second one on top of it.
+   *
+   * Every entry point below opens a peer, and opening a peer destroys the
+   * one before it. Two attempts in flight together therefore kill each
+   * other: the first is left holding a destroyed peer, the second inherits
+   * half-built state, and everything after that fails with 'could not reach
+   * the relay' even though the relay was fine. Hammering the button is the
+   * obvious way to get there, so the guard lives here rather than in the UI
+   * — any caller is covered, not just the one that was noticed.
+   */
+  attempt(run) {
+    if (this.connectAttempt) return this.connectAttempt;
+    this.connectAttempt = (async () => {
+      // A previous failure can leave a peer half-open. Start from nothing.
+      if (!this.connected && this.peer) {
+        try { this.peer.destroy(); } catch { /* already gone */ }
+        this.peer = null;
+      }
+      try {
+        return await run();
+      } catch (err) {
+        // Leave nothing behind for the next attempt to trip over.
+        if (!this.connected) {
+          if (this.peer) { try { this.peer.destroy(); } catch { /* noop */ } this.peer = null; }
+          this.setStatus('idle');
+        }
+        throw err;
+      } finally {
+        this.connectAttempt = null;
+      }
+    })();
+    return this.connectAttempt;
   }
 
   // ------------------------------------------------------------- plumbing
@@ -190,7 +226,11 @@ export class Session {
    * load") does the exact opposite and leaves everybody hosting an empty lobby
    * of their own.
    */
-  async quickPlay() {
+  quickPlay() {
+    return this.attempt(() => this.runQuickPlay());
+  }
+
+  async runQuickPlay() {
     this.setStatus('connecting', 'contacting relay');
     await this.open();
 
@@ -239,7 +279,11 @@ export class Session {
     });
   }
 
-  async hostPrivate(mode = DEFAULT_MODE, bots = 6) {
+  hostPrivate(mode = DEFAULT_MODE, bots = 6) {
+    return this.attempt(() => this.runHostPrivate(mode, bots));
+  }
+
+  async runHostPrivate(mode, bots) {
     this.setStatus('connecting', 'contacting relay');
     const code = makeCode();
     await this.open(codeId(code));
@@ -248,7 +292,11 @@ export class Session {
     return this.becomeHost(code, { isPrivate: true });
   }
 
-  async joinCode(code) {
+  joinCode(code) {
+    return this.attempt(() => this.runJoinCode(code));
+  }
+
+  async runJoinCode(code) {
     this.setStatus('connecting', 'contacting relay');
     await this.open();
     const conn = await this.tryJoin(codeId(code));
@@ -767,6 +815,7 @@ export class Session {
   }
 
   teardown() {
+    this.connectAttempt = null;
     this.stopPing();
     this.stopHostWatchdog();
     if (this.lobbyTimer) clearInterval(this.lobbyTimer);

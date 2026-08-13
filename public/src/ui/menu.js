@@ -129,20 +129,29 @@ export class Menu {
       card.innerHTML =
         `<div class="short">${m.short}</div><h4>${m.name}</h4><p>${m.blurb}</p>` +
         `<div class="meta">${m.teams ? '5V5' : 'FREE FOR ALL'} · UP TO ${m.maxPlayers}</div>`;
-      card.addEventListener('click', () => {
+      card.addEventListener('click', (e) => {
+        // A button keeps keyboard focus after a click, so Space re-fires it.
+        // Dropping focus is what stops the whole thing being spammable from
+        // the keyboard while the search screen is already up.
+        e.currentTarget.blur?.();
+        if (this.connecting) return;
         this.click();
         this.onPlay(id);
       });
       list.appendChild(card);
     }
 
-    $('party-join').addEventListener('click', () => {
+    $('party-join').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      if (this.connecting) return;
       const code = $('party-code').value.trim().toUpperCase();
       if (!code) return this.click('error');
       this.click();
       this.onJoinCode?.(code);
     });
-    $('private-create').addEventListener('click', () => {
+    $('private-create').addEventListener('click', (e) => {
+      e.currentTarget.blur();
+      if (this.connecting) return;
       this.click();
       this.onHost?.();
     });

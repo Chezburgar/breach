@@ -60,6 +60,7 @@ async function main() {
     audio,
     onPlay: async (mode) => {
       audio.unlock();
+      menu.connecting = true;
       menu.setSearching(true, { mode });
       try {
         const res = await net.quickPlay();
@@ -70,10 +71,13 @@ async function main() {
         console.error(err);
         menu.setSearching(false);
         menu.toast('Could not reach the matchmaking relay.', true);
+      } finally {
+        menu.connecting = false;
       }
     },
     onHost: async () => {
       audio.unlock();
+      menu.connecting = true;
       try {
         const res = await net.hostPrivate('breach', 6);
         menu.setSearching(false);
@@ -82,10 +86,13 @@ async function main() {
         console.error(err);
         menu.setSearching(false);
         menu.toast('Could not open a lobby.', true);
+      } finally {
+        menu.connecting = false;
       }
     },
     onJoinCode: async (code) => {
       audio.unlock();
+      menu.connecting = true;
       menu.setSearching(true, { mode: 'breach' });
       try {
         await net.joinCode(code);
@@ -93,6 +100,8 @@ async function main() {
       } catch (err) {
         menu.setSearching(false);
         menu.toast(err.message || 'Could not join that lobby.', true);
+      } finally {
+        menu.connecting = false;
       }
     },
     onLeaveLobby: () => {
