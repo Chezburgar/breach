@@ -337,6 +337,20 @@ export class Bot {
           }
         } else this.stuckTimer = Math.max(0, this.stuckTimer - dt * 2);
       }
+      // Slow drift counts as stuck too. The per-tick check above catches a
+      // bot pressed against a wall; this catches one shuffling on the spot
+      // behind cover, which is what leaves a round unfinished.
+      this.driftFrom = this.driftFrom || { ...p.state.pos };
+      this.driftTimer = (this.driftTimer || 0) + dt;
+      if (this.driftTimer > 5) {
+        if (vdist(p.state.pos, this.driftFrom) < 3) {
+          this.forceRepath = true;
+          this.goalTimer = 0;
+          this.path = null;
+        }
+        this.driftFrom = { ...p.state.pos };
+        this.driftTimer = 0;
+      }
       this.lastPos = { ...p.state.pos };
     }
 
@@ -537,9 +551,9 @@ export class Bot {
       if (room.time < q.spawnProtectUntil) continue;
       const d = vdist(p.state.pos, q.state.pos);
       if (d > this.skill.range) continue;
-      // Same standard as taking the shot: a quarter of a body showing is not
-      // "spotted", it is a glimpse through a railing.
-      if (this.exposure(eye, q) < 0.5) continue;
+      // Noticing someone is easier than shooting at them: a shoulder round a
+      // corner is enough to look. Half a body is still required to fire.
+      if (this.exposure(eye, q) < 0.25) continue;
 
       // Prefer close, and prefer whoever is already in front of us.
       const toward = Math.abs(angleDelta(this.aimYaw, Math.atan2(-(q.state.pos.x - p.state.pos.x), -(q.state.pos.z - p.state.pos.z))));
@@ -577,7 +591,10 @@ export class Bot {
     const exhausted = !this.path || this.pathIndex >= this.path.length;
     if (exhausted || this.goalTimer <= 0 || this.forceRepath) {
       this.forceRepath = false;
-      this.goalTimer = 10 + Math.random() * 8;
+      // A long lease on a goal is fine while patrolling and useless while
+      // hunting — the target has moved by the time you arrive.
+      const push = this.urgency();
+      this.goalTimer = (10 + Math.random() * 8) * (1 - push * 0.7);
       const from = nearestReachableNode(room.nav, room.world, p.state.pos);
       const goal = this.pickGoal();
       this.path = findPath(room.nav, from, goal);
@@ -615,6 +632,21 @@ export class Bot {
     return n ? { x: sx / n, z: sz / n } : null;
   }
 
+  /**
+   * How badly this bot needs to find someone. Climbs as the round clock runs
+   * down and as the map empties. Without it the last survivors patrol two
+   * different wings and the round only ends when the timer does.
+   */
+  urgency() {
+    const room = this.room;
+    const total = room.mode.roundTime || 150;
+    const left = Math.max(0, room.phaseEnds - room.time);
+    const byClock = 1 - Math.min(1, left / (total * 0.55));
+    const standing = room.aliveCount(0) + room.aliveCount(1);
+    const byCount = standing <= 3 ? 1 : (standing <= 5 ? 0.6 : 0);
+    return Math.max(byClock, byCount);
+  }
+
   pickGoal() {
     const room = this.room;
     const nodes = room.nav.nodes;
@@ -637,10 +669,21 @@ export class Bot {
     const enemies = [...room.players.values()].filter(
       (q) => q.alive && q !== this.player && (!room.mode.teams || q.team !== this.player.team)
     );
-    if (enemies.length && Math.random() < 0.65) {
-      const e = enemies[Math.floor(Math.random() * enemies.length)];
-      return nearestNode(room.nav, e.state.pos);
+    // Under pressure, head for the closest one rather than a random one, and
+    // never wander off to an arbitrary corner of the map.
+    const push = this.urgency();
+    if (enemies.length && Math.random() < 0.55 + push * 0.45) {
+      let pick = enemies[Math.floor(Math.random() * enemies.length)];
+      if (push > 0.5) {
+        let best = Infinity;
+        for (const e of enemies) {
+          const d = vdist(this.player.state.pos, e.state.pos);
+          if (d < best) { best = d; pick = e; }
+        }
+      }
+      return nearestNode(room.nav, pick.state.pos);
     }
+    if (push > 0.5 && enemies.length) return nearestNode(room.nav, enemies[0].state.pos);
     return Math.floor(Math.random() * nodes.length);
   }
 }
