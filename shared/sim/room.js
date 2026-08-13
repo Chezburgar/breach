@@ -802,9 +802,9 @@ export class GameRoom {
     if (!p.alive || this.phase !== 'live') return;
     if (this.time < p.grenadeCooldown) return;
     const def = getGrenade(kind);
-    if (!p.grenades[def.id]) return;
 
-    p.grenades[def.id] = 0;
+    // Throwables are not consumable. The cooldown is the entire limit, so a
+    // round never ends with somebody holding a flash they were saving.
     p.grenadeCooldown = this.time + GRENADE_COOLDOWN;
 
     const eye = eyePosition(p.state);

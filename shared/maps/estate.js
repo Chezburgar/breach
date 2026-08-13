@@ -124,11 +124,19 @@ function perimeter(b) {
     b.ext(R - 0.3, 0, z - 0.6, R + T + 0.3, H + 1.1, z + 0.6, 'stone');
   }
 
-  // Treeline beyond the wall, visual only.
+  // Treeline beyond the wall, visual only. Laid on a circle it fouled the
+  // wall near the axes — the perimeter is a square, so a tree at radius 113
+  // on the diagonal is 25 m clear while the same radius due east lands on the
+  // masonry, and a fifteen-metre pine then grows straight through it into the
+  // grounds. Pushed out until it clears the square, not the circle.
+  const CLEAR = R + T + 8;
   for (let i = 0; i < 46; i++) {
     const a = (i / 46) * Math.PI * 2;
     const r = 104 + ((i * 37) % 22);
-    b.prop('pine', Math.cos(a) * r, 0, Math.sin(a) * r, { scale: 1.4 + ((i * 7) % 5) * 0.2 });
+    let x = Math.cos(a) * r, z = Math.sin(a) * r;
+    const reach = Math.max(Math.abs(x), Math.abs(z));
+    if (reach < CLEAR) { const k = CLEAR / reach; x *= k; z *= k; }
+    b.prop('pine', x, 0, z, { scale: 1.4 + ((i * 7) % 5) * 0.2 });
   }
 }
 
@@ -859,7 +867,9 @@ function meta(b) {
   for (const d of doors) b.node(d[0], d[1], d[2], ['door']);
 
   // --- dressing ---------------------------------------------------------
-  for (const [x, z] of [[-30, -56], [30, -56], [-44, -30], [44, -30], [-30, 66], [34, 20]]) {
+  // [34, 20] sat on the manor's own east wall and grew through three storeys
+  // of it; moved out into the stable yard.
+  for (const [x, z] of [[-30, -56], [30, -56], [-44, -30], [44, -30], [-36, 66], [56, -26]]) {
     b.prop('tree', x, 0, z, { scale: 1.5 });
     b.ext(x - 0.45, 0, z - 0.45, x + 0.45, 3.2, z + 0.45, 'bark');
   }

@@ -131,13 +131,14 @@ export class HUD {
 
   renderGrenades(s) {
     const bar = $('grenade-bar');
-    if (!s.grenadeStock) return;
     const cd = s.grenadeCooldown || 0;
-    const key = `${s.grenadeEquipped}|${GRENADE_ORDER.map((k) => s.grenadeStock[k]).join('')}|${Math.ceil(cd)}`;
+    // Nothing is spent any more — the cooldown is shared across all three,
+    // so they are either all ready or all counting down together.
+    const key = `${s.grenadeEquipped}|${Math.ceil(cd)}`;
     if (bar.dataset.key !== key) {
       bar.dataset.key = key;
       bar.innerHTML = GRENADE_ORDER.map((k, i) => {
-        const have = s.grenadeStock[k];
+        const have = cd <= 0;
         const active = k === s.grenadeEquipped;
         const pct = cd > 0 ? (cd / (s.grenadeCooldownMax || 15)) * 100 : 0;
         return `<div class="gnd ${active ? 'active' : ''} ${have ? '' : 'spent'}">
