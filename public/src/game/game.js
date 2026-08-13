@@ -65,6 +65,7 @@ export class Game {
     // Piloting: the drone's id while we are driving it, plus what the
     // server says we own. `droneUsed` gates the once-a-round deploy.
     this.pilotId = null;
+    this.myDroneId = null;
     this.droneUsed = false;
     this.droneScanReady = 0;
     this.marks = [];
@@ -150,6 +151,7 @@ export class Game {
       this.grenadeView.clear();
       this.droneUsed = false;
       this.pilotId = null;
+      this.myDroneId = null;
       this.hud.hideDeath();
       this.hud.roundBanner(`ROUND ${msg.round}`, this.roundSubtitle(msg.scores), 2200);
       this.audio.countdownBeep(false);
@@ -179,18 +181,18 @@ export class Game {
     });
     net.on('drone.start', (msg) => {
       this.pilotId = msg.id;
-      this._droneYaw = this.local?.yaw ?? 0;
-      this._dronePitch = 0;
+      this._droneYaw = Number.isFinite(msg.yaw) ? msg.yaw : (this.local?.yaw ?? 0);
+      this._dronePitch = Number.isFinite(msg.pitch) ? msg.pitch : 0;
       this.droneUsed = true;
       this.droneScanReady = 0;
       this.unequipGrenade();
-      this.hud.toast('DRONE DEPLOYED — Z TO RECALL', 2200);
+      this.hud.toast('Z TO STEP OUT — THE DRONE STAYS PUT', 2200);
       this.audio.click('reload');
     });
     net.on('drone.end', (msg) => {
       this.pilotId = null;
-      this.hud.toast(msg?.recalled ? 'DRONE RECALLED' : 'DRONE DESTROYED', 1800);
-      this.audio.click(msg?.recalled ? 'ui' : 'error');
+      this.hud.toast(msg?.parked ? 'DRONE PARKED — Z TO RETURN' : 'DRONE DESTROYED', 1800);
+      this.audio.click(msg?.parked ? 'ui' : 'error');
     });
     net.on('drone.spawn', () => this.audio.click('ui'));
     net.on('drone.down', (msg) => {
@@ -389,6 +391,7 @@ export class Game {
     }
 
     this.droneRows = msg.dr || [];
+    this.myDroneId = msg.mine || null;
     this.marks = msg.mk || [];
     // The server is the authority on whether we are still driving: losing
     // the drone, dying, or the round ending all end it the same way.
@@ -688,10 +691,13 @@ export class Game {
 
     // Throwables are equipped like a weapon: pick one up, then throw it with
     // the fire button. `G` is a shortcut that equips and throws in one go.
-    // Drone. One per round; while it is out, Z brings it home.
+    // Drone. One machine a round, but you step in and out of it as often as
+    // you like — leaving the feed parks it where it is rather than picking
+    // it up, so it can sit watching a door while you go and fight.
     if (input.wasPressed('drone')) {
-      if (this.pilotId) this.net.send({ t: 'drone.recall' });
-      else if (this.droneUsed) { this.audio.click('error'); this.hud.toast('DRONE SPENT', 1200); }
+      if (this.pilotId) this.net.send({ t: 'drone.exit' });
+      else if (this.myDroneId) this.net.send({ t: 'drone.enter' });
+      else if (this.droneUsed) { this.audio.click('error'); this.hud.toast('DRONE DESTROYED', 1200); }
       else this.net.send({ t: 'drone.deploy' });
     }
     // Everything below is the operator's body, which is not where we are.
@@ -1057,6 +1063,7 @@ export class Game {
       grenadeEquipped: this.grenadeEquipped,
       grenadeStock: this.grenadeStock,
       droneUsed: this.droneUsed,
+      droneParked: !!this.myDroneId && !this.pilotId,
       dronePiloting: !!this.pilotId,
       droneScanCooldown: this.droneScanReady,
       droneScanMax: DRONE.scanCooldown,

@@ -840,11 +840,38 @@ export class GameRoom {
     p.drone = createDrone(`d${++this.droneSeq}`, p, at, p.cmd.yaw);
     p.droneUsed = true;
     p.piloting = true;
-    this.send(p.client, { t: 'drone.start', id: p.drone.id, scanCooldown: DRONE.scanCooldown });
+    this.send(p.client, {
+      t: 'drone.start', id: p.drone.id, scanCooldown: DRONE.scanCooldown,
+      yaw: p.drone.yaw, pitch: 0,
+    });
     this.broadcast({ t: 'drone.spawn', id: p.drone.id, owner: p.id, team: p.team });
   }
 
-  /** Destroy or recall it. byOwner distinguishes a recall from a kill. */
+  /**
+   * Step back into a drone that is already out there. It stays wherever it
+   * rolled to, which is the whole point of leaving it somewhere useful.
+   */
+  enterDrone(p) {
+    if (!p.alive || this.phase !== 'live') return;
+    const d = p.drone;
+    if (!d || !d.alive || p.piloting) return;
+    p.piloting = true;
+    d.cmd = { btn: 0, yaw: d.yaw, pitch: d.pitch };
+    this.send(p.client, {
+      t: 'drone.start', id: d.id, scanCooldown: DRONE.scanCooldown,
+      yaw: d.yaw, pitch: d.pitch,
+    });
+  }
+
+  /** Put the controller down. The drone stays parked where it is. */
+  exitDrone(p) {
+    if (!p.piloting) return;
+    p.piloting = false;
+    if (p.drone) p.drone.cmd = { btn: 0, yaw: p.drone.yaw, pitch: p.drone.pitch };
+    this.send(p.client, { t: 'drone.end', parked: true });
+  }
+
+  /** Destroy it. There is no recall — only a bullet takes it off the board. */
   killDrone(p, byOwner) {
     const d = p.drone;
     p.piloting = false;
@@ -864,15 +891,12 @@ export class GameRoom {
       const d = p.drone;
       if (!d || !d.alive) continue;
 
-      // Its owner going down does not kill it, but nobody is driving, so it
-      // rolls to a stop and gives itself up shortly after.
-      if (!p.alive || !live) {
-        p.piloting = false;
+      // Nobody driving — because the pilot stepped out, or died, or the
+      // round is not live — parks it. It stays exactly where it stopped and
+      // waits to be picked up again.
+      if (!p.alive || !live || !p.piloting) {
+        if (!p.alive || !live) p.piloting = false;
         d.cmd = { btn: 0, yaw: d.yaw, pitch: d.pitch };
-        d.idleSince = d.idleSince || this.time;
-        if (this.time - d.idleSince > DRONE.orphanLife) { this.killDrone(p, false); continue; }
-      } else {
-        d.idleSince = 0;
       }
       stepDrone(d, d.cmd, this.world, dt);
     }
@@ -1403,6 +1427,7 @@ export class GameRoom {
         dr: drones,
         mk: this.marksFor(p.team),
         pilot: p.piloting ? (p.drone?.id || null) : null,
+        mine: p.drone?.id || null,
         sc: this.scores,
         alive: [this.aliveCount(0), this.aliveCount(1)],
         round: this.roundNo,
@@ -1436,7 +1461,8 @@ export class GameRoom {
       case 'melee': this.melee(p, p.cmd); break;
       case 'grenade': this.throwGrenade(p, msg.kind, msg.charge); break;
       case 'drone.deploy': this.deployDrone(p); break;
-      case 'drone.recall': this.killDrone(p, true); break;
+      case 'drone.enter': this.enterDrone(p); break;
+      case 'drone.exit': this.exitDrone(p); break;
       case 'drone.scan': this.droneScan(p); break;
       case 'drone.input': {
         const d = p.drone;

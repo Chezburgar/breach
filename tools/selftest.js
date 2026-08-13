@@ -391,6 +391,9 @@ function checkDrone() {
   // happens to have wandered by the time it fires.
   enemy.bot.think = () => { enemy.cmd = { seq: 0, btn: 0, yaw: enemy.cmd.yaw, pitch: 0 }; };
   step(2);
+  // Both stood on open lawn. Scanning whichever corner a bot happened to
+  // wander into was a test of the estate's geometry, not of the scanner.
+  enemy.state.pos = { x: 0, y: 0.1, z: 70 };
   pilot.drone.pos = { x: enemy.state.pos.x, y: enemy.state.pos.y + 0.1, z: enemy.state.pos.z + 4 };
   pilot.drone.yaw = Math.atan2(-(enemy.state.pos.x - pilot.drone.pos.x), -(enemy.state.pos.z - pilot.drone.pos.z));
   pilot.drone.pitch = 0.2;
@@ -399,6 +402,20 @@ function checkDrone() {
   ok(enemy.markedUntil > room.time, 'drone: a scan marks what it is looking at');
   ok(room.marksFor(pilot.team).includes(enemy.id) && !room.marksFor(enemy.team).includes(enemy.id),
     'drone: marks are visible to the pilot team only');
+
+  // Stepping out parks it; stepping back in resumes from where it sat.
+  const parked = { ...pilot.drone.pos };
+  room.onMessage(pilot.client, { t: 'drone.exit' });
+  step(60);
+  ok(!!pilot.drone && pilot.drone.alive && !pilot.piloting,
+    'drone: stepping out parks it rather than losing it');
+  ok(Math.hypot(pilot.drone.pos.x - parked.x, pilot.drone.pos.z - parked.z) < 0.5,
+    'drone: a parked drone stays where it was left');
+  room.onMessage(pilot.client, { t: 'drone.enter' });
+  ok(pilot.piloting, 'drone: you can step back into it');
+  const sameId = pilot.drone.id;
+  room.onMessage(pilot.client, { t: 'drone.deploy' });
+  ok(pilot.drone.id === sameId, 'drone: deploying again does not build a second one');
 
   const shooter = ps.find((q) => q.team !== pilot.team && q.alive && q !== enemy) || enemy;
   const d = pilot.drone;
