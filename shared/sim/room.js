@@ -285,10 +285,16 @@ export class GameRoom {
   pushPhase() { this.broadcast(this.phaseMessage()); }
 
   phaseMessage() {
+    const left = Math.max(0, this.phaseEnds - this.time);
     return {
       t: 'phase',
       phase: this.phase,
-      remaining: Math.max(0, this.phaseEnds - this.time),
+      remaining: left,
+      // The round clock. Never sent before, so the HUD read it as undefined
+      // and showed --:-- for the whole round. While the round is live it is
+      // the same countdown as the phase; before it starts it is the length
+      // of the round about to be played.
+      matchTime: this.phase === 'live' ? left : this.mode.roundTime,
       scores: this.scores,
       round: this.roundNo,
       alive: [this.aliveCount(0), this.aliveCount(1)],

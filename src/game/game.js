@@ -319,7 +319,7 @@ export class Game {
     this.phase = msg.phase;
     this.phaseRemaining = msg.remaining;
     this.scores = msg.scores || this.scores;
-    this.matchTimeLeft = msg.matchTime;
+    this.matchTimeLeft = Number.isFinite(msg.matchTime) ? msg.matchTime : this.matchTimeLeft;
 
     if (prev === PHASE.INTRO && this.phase !== PHASE.INTRO) {
       this.hud.hideIntro();
@@ -351,6 +351,10 @@ export class Game {
     this.local.applyStatus(msg.you);
     this.scores = msg.sc || this.scores;
     this.phaseRemaining = msg.rem ?? this.phaseRemaining;
+    // Resync the round clock off the snapshot rather than trusting a local
+    // countdown to hold for a two-minute round: while the round is live the
+    // phase deadline *is* the round deadline.
+    if (this.phase === PHASE.LIVE && msg.rem != null) this.matchTimeLeft = msg.rem;
     this.respawnIn = msg.you.respawnIn ?? 0;
     if (msg.you.zone) this.zoneName = msg.you.zone;
     if (msg.you.nades) this.grenadeStock = msg.you.nades;
