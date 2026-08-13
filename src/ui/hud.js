@@ -163,8 +163,10 @@ export class HUD {
    */
   renderDrone(s) {
     const el = $('drone-chip');
-    const state = s.dronePiloting ? 'flying' : (s.droneUsed ? 'spent' : 'ready');
-    const label = s.dronePiloting ? 'RECALL' : (s.droneUsed ? 'SPENT' : 'DRONE');
+    const state = s.dronePiloting ? 'flying'
+      : (s.droneParked ? 'parked' : (s.droneUsed ? 'spent' : 'ready'));
+    const label = s.dronePiloting ? 'STEP OUT'
+      : (s.droneParked ? 'RETURN' : (s.droneUsed ? 'DESTROYED' : 'DRONE'));
     if (el.dataset.key !== state) {
       el.dataset.key = state;
       el.className = `drone-chip ${state}`;

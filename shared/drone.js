@@ -25,13 +25,13 @@ export const DRONE = {
   friction: 11,
   airAccel: 12,
 
-  jumpVelocity: 5.0,
+  jumpVelocity: 7.4,
   gravity: MOVE.gravity,
   maxFallSpeed: 40,
 
-  // How long a drone survives unattended once you stop driving it. Recalling
-  // is instant; this is only for the case where its owner is killed.
-  orphanLife: 8.0,
+  // A drone left alone stays where it is. You get one per round; stepping
+  // out of the feed parks it rather than destroying it, and the only thing
+  // that takes it off the board is a bullet.
 
   scanRange: 34,
   scanCooldown: 2.2,

@@ -112,13 +112,25 @@ const _v = new THREE.Vector3();
 export class MarkView {
   constructor(scene) {
     this.scene = scene;
-    this.marks = new Map();      // id -> sprite
-    this.material = new THREE.SpriteMaterial({
+    this.marks = new Map();      // id -> { chevron, body }
+    this.chevronMat = new THREE.SpriteMaterial({
       map: chevronTexture(),
       depthTest: false,
       depthWrite: false,
       transparent: true,
       color: 0xff7a3d,
+      sizeAttenuation: false,     // constant on screen, readable at any range
+    });
+    // A body-sized slab standing where they are. Additive and depth-blind,
+    // so it glows through whatever they are hiding behind.
+    this.bodyMat = new THREE.SpriteMaterial({
+      map: bodyTexture(),
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      color: 0xff5a2a,
+      opacity: 0.85,
     });
   }
 
@@ -131,27 +143,53 @@ export class MarkView {
     for (const id of live) {
       const at = find(id);
       if (!at) { this.drop(id); continue; }
-      let s = this.marks.get(id);
-      if (!s) {
-        s = new THREE.Sprite(this.material);
-        s.scale.set(0.5, 0.5, 1);
-        s.renderOrder = 60;
-        this.scene.add(s);
-        this.marks.set(id, s);
+      let m = this.marks.get(id);
+      if (!m) {
+        const chevron = new THREE.Sprite(this.chevronMat);
+        // Screen-space units, because sizeAttenuation is off.
+        chevron.scale.set(0.045, 0.045, 1);
+        chevron.renderOrder = 62;
+        const body = new THREE.Sprite(this.bodyMat);
+        body.scale.set(0.9, 1.9, 1);
+        body.renderOrder = 61;
+        this.scene.add(chevron, body);
+        m = { chevron, body };
+        this.marks.set(id, m);
       }
-      s.position.set(at.x, at.y + 2.35, at.z);
+      m.chevron.position.set(at.x, at.y + 2.45, at.z);
+      m.body.position.set(at.x, at.y + 0.95, at.z);
     }
     for (const id of [...this.marks.keys()]) if (!live.has(id)) this.drop(id);
   }
 
   drop(id) {
-    const s = this.marks.get(id);
-    if (!s) return;
-    this.scene.remove(s);
+    const m = this.marks.get(id);
+    if (!m) return;
+    this.scene.remove(m.chevron, m.body);
     this.marks.delete(id);
   }
 
   clear() { for (const id of [...this.marks.keys()]) this.drop(id); }
+}
+
+/** A soft upright blob — a person-shaped smear, not a hard rectangle. */
+function bodyTexture() {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 64, 4, 32, 64, 54);
+  g.addColorStop(0, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.55, 'rgba(255,255,255,0.20)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 64, 128);
+  // A brighter core so the outline reads as a figure at distance.
+  x.fillStyle = 'rgba(255,255,255,0.5)';
+  x.beginPath(); x.ellipse(32, 26, 11, 13, 0, 0, 7); x.fill();
+  x.beginPath(); x.roundRect(19, 40, 26, 60, 9); x.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 function chevronTexture() {

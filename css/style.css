@@ -730,3 +730,5 @@ h3 { font-size: 12px; color: var(--muted); }
 .df-scan.cooling b { background: rgba(127, 212, 239, 0.3); color: rgba(6, 18, 26, 0.6); }
 .df-scan.locked { border-color: var(--attack); color: #ffd7c6; }
 .df-scan.locked b { background: var(--attack); }
+
+.drone-chip.parked { color: #7fd4ef; border-color: rgba(127, 212, 239, 0.55); }
