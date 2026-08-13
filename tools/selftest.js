@@ -385,10 +385,13 @@ function checkDrone() {
   ok(drift < 0.05, 'drone: the operator stays put while piloting', `${drift.toFixed(2)}m of drift`);
 
   const enemy = ps.find((q) => q.team !== pilot.team && q.alive);
-  pilot.drone.pos = { x: enemy.state.pos.x, y: enemy.state.pos.y + 0.1, z: enemy.state.pos.z + 4 };
-  const yaw = Math.atan2(-(enemy.state.pos.x - pilot.drone.pos.x), -(enemy.state.pos.z - pilot.drone.pos.z));
-  room.onMessage(pilot.client, { t: 'drone.input', btn: 0, yaw, pitch: 0.15 });
+  // Hold the target still: this is a test of the scan, not of where a bot
+  // happens to have wandered by the time it fires.
+  enemy.bot.think = () => { enemy.cmd = { seq: 0, btn: 0, yaw: enemy.cmd.yaw, pitch: 0 }; };
   step(2);
+  pilot.drone.pos = { x: enemy.state.pos.x, y: enemy.state.pos.y + 0.1, z: enemy.state.pos.z + 4 };
+  pilot.drone.yaw = Math.atan2(-(enemy.state.pos.x - pilot.drone.pos.x), -(enemy.state.pos.z - pilot.drone.pos.z));
+  pilot.drone.pitch = 0.2;
   pilot.drone.scanReadyAt = 0;
   room.onMessage(pilot.client, { t: 'drone.scan' });
   ok(enemy.markedUntil > room.time, 'drone: a scan marks what it is looking at');

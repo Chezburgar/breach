@@ -168,3 +168,95 @@ function chevronTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
+
+/**
+ * The operator's phone.
+ *
+ * Taking the whole screen away and putting you inside the drone left your body
+ * standing somewhere you could no longer see. This instead renders the drone's
+ * view into a texture and shows it on a handset held up in front of you: you
+ * drive from the feed, but you are still standing in the room, still looking
+ * at it, and still very much shootable.
+ */
+export class DronePhone {
+  constructor(renderer, worldScene, rig) {
+    this.renderer = renderer;
+    this.world = worldScene;
+    this.active = false;
+    this.blend = 0;
+
+    const w = renderer.quality === 'low' ? 320 : 512;
+    const h = Math.round(w * 0.62);
+    this.rt = new THREE.WebGLRenderTarget(w, h, {
+      type: THREE.HalfFloatType,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      depthBuffer: true,
+      samples: renderer.quality === 'low' ? 0 : 4,
+    });
+    this.rt.texture.colorSpace = THREE.NoColorSpace;
+
+    // A drone camera is a wide, cheap lens.
+    this.camera = new THREE.PerspectiveCamera(92, w / h, 0.05, 400);
+
+    this.group = new THREE.Group();
+    this.group.visible = false;
+    rig.add(this.group);
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.168, 0.088, 0.009),
+      new THREE.MeshStandardMaterial({ color: 0x14161a, metalness: 0.6, roughness: 0.45 })
+    );
+    this.group.add(body);
+
+    this.screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.150, 0.074),
+      new THREE.MeshBasicMaterial({ map: this.rt.texture, toneMapped: false })
+    );
+    this.screen.position.z = 0.0051;
+    this.group.add(this.screen);
+
+    // A thin bezel glow so the handset reads as powered even in the dark.
+    const bezel = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.156, 0.080),
+      new THREE.MeshBasicMaterial({ color: 0x2b6f8a, transparent: true, opacity: 0.5 })
+    );
+    bezel.position.z = 0.0049;
+    this.group.add(bezel);
+
+    this.group.traverse((o) => { if (o.isMesh) { o.renderOrder = 30; o.frustumCulled = false; } });
+  }
+
+  /**
+   * @param on    are we driving?
+   * @param drone `{ pos }` of the drone we are driving, or null
+   * @param yaw   where the pilot is pointing it
+   */
+  update(dt, on, drone, yaw, pitch) {
+    this.blend = THREE.MathUtils.clamp(this.blend + (on ? dt * 5 : -dt * 6), 0, 1);
+    this.active = this.blend > 0.02 && !!drone;
+    this.group.visible = this.active;
+    if (!this.active) return;
+
+    // Held up and slightly to the right, tilted back toward the eye. It rises
+    // into place rather than appearing, so the hand-off reads.
+    const t = this.blend;
+    this.group.position.set(0.085, -0.075 - (1 - t) * 0.16, -0.26);
+    this.group.rotation.set(-0.34 + (1 - t) * 0.5, -0.30, 0.06);
+
+    this.camera.position.set(drone.pos.x, drone.pos.y + DRONE.eye, drone.pos.z);
+    this.camera.rotation.order = 'YXZ';
+    this.camera.rotation.set(pitch, yaw, 0);
+  }
+
+  /** Draw the feed. Call before the main composer render. */
+  render() {
+    if (!this.active) return;
+    this.renderer.renderToTarget(this.world, this.camera, this.rt);
+  }
+
+  dispose() {
+    this.rt.dispose();
+    this.group.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+  }
+}

@@ -20,7 +20,7 @@ import { ViewModel } from './viewmodel.js';
 import { ScopeRenderer } from './scope.js';
 import { TrainingMode } from './training.js';
 import { GrenadeView } from './grenades.js';
-import { DroneView, MarkView } from './drone.js';
+import { DroneView, MarkView, DronePhone } from './drone.js';
 import { DRONE } from '/shared/drone.js';
 import { GRENADE_IDS, GRENADE_COOLDOWN, getGrenade } from '/shared/grenades.js';
 import { saveProfile } from '../ui/menu.js';
@@ -54,6 +54,7 @@ export class Game {
     this.grenadeView = new GrenadeView(this.renderer.scene, this.effects, this.audio);
     this.droneView = new DroneView(this.renderer.scene);
     this.markView = new MarkView(this.renderer.scene);
+    this.phone = new DronePhone(this.renderer, this.renderer.scene, this.vmCamera);
 
     this.grenadeKind = 'frag';
     this.grenadeStock = { frag: 1, flash: 1, smoke: 1 };
@@ -694,7 +695,7 @@ export class Game {
     }
     // Everything below is the operator's body, which is not where we are.
     if (this.pilotId) {
-      if (input.takeMouseClick() && this.droneScanReady <= 0) this.net.send({ t: 'drone.scan' });
+      if (input.isDown('scan') && this.droneScanReady <= 0) this.net.send({ t: 'drone.scan' });
       return;
     }
     if (input.wasPressed('nade1')) this.equipGrenade('frag');
@@ -749,11 +750,11 @@ export class Game {
   }
 
   /**
-   * Sit in the drone's camera head and steer it. Look input drives the
-   * drone's own yaw and pitch, movement keys go to the server as its
-   * command; the operator's body is frozen at the other end.
+   * Drive the drone from the handset. The look input steers the drone,
+   * not the operator — they are staring at a screen — and the movement keys
+   * go to the server as the drone's command.
    */
-  updateDroneCamera(dt) {
+  updateDroneControl(dt) {
     const d = this.droneView.get(this.pilotId);
     this._droneYaw = this._droneYaw ?? this.local.yaw;
     this._dronePitch = this._dronePitch ?? 0;
@@ -773,19 +774,7 @@ export class Game {
       this.net.send({ t: 'drone.input', btn, yaw: this._droneYaw, pitch: this._dronePitch });
     }
 
-    // Follow the server's drone position, but look where the player is
-    // looking right now — turning has to feel local.
-    const at = d ? d.pos : this.local.state.pos;
-    this.camera.position.set(at.x, at.y + DRONE.eye, at.z);
-    this.camera.rotation.order = 'YXZ';
-    this.camera.rotation.set(this._dronePitch, this._droneYaw, 0);
-    // A drone camera is a wide, cheap lens.
-    if (Math.abs(this.camera.fov - 96) > 0.01) {
-      this.camera.fov = 96;
-      this.camera.updateProjectionMatrix();
-    }
-    this.vmCamera.position.copy(this.camera.position);
-    this.vmCamera.quaternion.copy(this.camera.quaternion);
+    void d;
   }
 
   // ---------------------------------------------------------------- frame
@@ -840,20 +829,23 @@ export class Game {
       landDip: this.local.landDip,
     });
 
-    if (this.pilotId) {
-      this.updateDroneCamera(dt);
-    } else if (this.local.alive || this.phase === PHASE.INTRO) {
+    if (this.local.alive || this.phase === PHASE.INTRO) {
       this.local.updateCamera(this.camera, this.vmCamera, dt, this.scope);
     } else {
       this.updateSpectatorCamera(dt);
     }
     this.scope.update(this.local.alive ? this.local.adsBlend : 0, this.camera, this.vmCamera, this.local.fov);
     this.viewmodel.holder.visible = this.local.alive && !this.pilotId;
+    // Our own drone is not hidden any more — we are watching it on a screen,
+    // not sitting in it, so it should be visible if we can see it.
+    if (this.pilotId) this.droneView.setHidden(this.pilotId, false);
     this.grenadeView.update(dt);
     this.droneScanReady = Math.max(0, this.droneScanReady - dt);
+    if (this.pilotId) this.updateDroneControl(dt);
+    this.phone.update(dt, !!this.pilotId, this.droneView.get(this.pilotId),
+      this._droneYaw || 0, this._dronePitch || 0);
     this.droneView.sync(this.droneRows, dt);
     // Our own drone is hidden from us — we are sitting in its camera head.
-    if (this.pilotId) this.droneView.setHidden(this.pilotId, true);
     this.markView.sync(this.marks, (id) => this.remotes.get(id)?.renderPos || null);
 
     this.processLocalEvents();
@@ -1048,6 +1040,8 @@ export class Game {
       grenadeKind: this.grenadeKind,
       grenadeEquipped: this.grenadeEquipped,
       grenadeStock: this.grenadeStock,
+      droneUsed: this.droneUsed,
+      dronePiloting: !!this.pilotId,
       grenadeCooldown: this.grenadeCooldown,
       grenadeCooldownMax: GRENADE_COOLDOWN,
       spectating: !l.alive && this.phase === PHASE.LIVE,
@@ -1074,6 +1068,7 @@ export class Game {
 
   render(dt) {
     this.scope.render();
+    this.phone.render();
     this.renderer.render(dt);
   }
 }

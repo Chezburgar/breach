@@ -16,6 +16,9 @@ const GRENADE_GLYPH = {
   smoke: '<svg viewBox="0 0 24 24"><path d="M6 16a4 4 0 0 1 .6-7.9A5 5 0 0 1 16 7a4 4 0 0 1 2 9z"/><rect x="8" y="17" width="9" height="2" rx="1"/></svg>',
 };
 
+
+const DRONE_GLYPH = '<svg viewBox="0 0 24 24"><rect x="6" y="9" width="12" height="6" rx="1.5"/><circle cx="6.5" cy="16.5" r="2.6"/><circle cx="17.5" cy="16.5" r="2.6"/><path d="M11 5h2v4h-2z"/><circle cx="12" cy="4.4" r="2"/></svg>';
+
 export class HUD {
   constructor() {
     this.root = $('hud');
@@ -112,6 +115,7 @@ export class HUD {
 
     this.renderFlash(s.blind);
     this.renderGrenades(s);
+    this.renderDrone(s);
     this.renderSpectate(s);
   }
 
@@ -151,6 +155,22 @@ export class HUD {
     }
   }
 
+
+  /**
+   * The drone chip. One asset, one key, three states — a player should not
+   * have to be told in a toast that Z exists.
+   */
+  renderDrone(s) {
+    const el = $('drone-chip');
+    const state = s.dronePiloting ? 'flying' : (s.droneUsed ? 'spent' : 'ready');
+    const label = s.dronePiloting ? 'RECALL' : (s.droneUsed ? 'SPENT' : 'DRONE');
+    if (el.dataset.key !== state) {
+      el.dataset.key = state;
+      el.className = `drone-chip ${state}`;
+      el.innerHTML = `${DRONE_GLYPH}<span>${label}</span><b>Z</b>`;
+    }
+    el.classList.toggle('hidden', !s.alive);
+  }
   renderSpectate(s) {
     const bar = $('spectate-bar');
     const on = !!s.spectating && !!s.spectateName;
