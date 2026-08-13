@@ -116,6 +116,7 @@ export class HUD {
     this.renderFlash(s.blind);
     this.renderGrenades(s);
     this.renderDrone(s);
+    this.renderDroneFeed(s);
     this.renderSpectate(s);
   }
 
@@ -171,6 +172,30 @@ export class HUD {
     }
     el.classList.toggle('hidden', !s.alive);
   }
+  /**
+   * The feed chrome. The picture is the whole screen, so this is only the
+   * edges: what it is, what it can do, and which key does it. The scan
+   * prompt is the part that matters — a control nobody can find is not a
+   * control.
+   */
+  renderDroneFeed(s) {
+    const el = $('drone-feed');
+    el.classList.toggle('hidden', !s.dronePiloting);
+    if (!s.dronePiloting) { this.lastScanKey = null; return; }
+
+    const cd = s.droneScanCooldown || 0;
+    const max = s.droneScanMax || 2.2;
+    const state = cd > 0 ? 'cooling' : 'ready';
+    if (state !== this.lastScanKey) {
+      this.lastScanKey = state;
+      $('df-scan').className = `df-scan ${cd > 0 ? 'cooling' : ''}`;
+      $('df-scan').querySelector('span').textContent =
+        cd > 0 ? 'RECHARGING' : 'HOLD TO SCAN';
+    }
+    // The bar drains as the scanner recharges.
+    $('df-scan').querySelector('i').style.width = `${Math.max(0, (1 - cd / max)) * 100}%`;
+  }
+
   renderSpectate(s) {
     const bar = $('spectate-bar');
     const on = !!s.spectating && !!s.spectateName;
