@@ -77,8 +77,44 @@ export class Menu {
     this.buildProfileTab();
     this.buildSettings();
     this.buildLobby();
+    $('settings-close').addEventListener('click', () => { this.click('back'); this.closeSettings(); });
+    $('settings-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'settings-modal') this.closeSettings();
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape' && !$('settings-modal').classList.contains('hidden')) {
+        e.stopPropagation();
+        this.closeSettings();
+      }
+    }, true);
     this.refreshChip();
     this.renderLoadout();
+  }
+
+  /**
+   * Show the settings panel in a dialog over whatever is already on screen.
+   *
+   * The panel is *moved* out of the menu rather than copied: it is built once,
+   * with its inputs already bound to the profile, and a second copy would
+   * quietly stop reflecting changes made in the first. It goes home when the
+   * dialog closes.
+   */
+  openSettings(onClose) {
+    const panel = $('tab-settings');
+    const host = $('settings-host');
+    if (panel.parentElement !== host) host.appendChild(panel);
+    $('settings-modal').classList.remove('hidden');
+    this.settingsReturn = onClose || null;
+  }
+
+  closeSettings() {
+    const panel = $('tab-settings');
+    const menuRoot = $('menu');
+    if (panel.parentElement !== menuRoot) menuRoot.appendChild(panel);
+    $('settings-modal').classList.add('hidden');
+    const back = this.settingsReturn;
+    this.settingsReturn = null;
+    back?.();
   }
 
   show() { this.el.classList.remove('hidden'); }

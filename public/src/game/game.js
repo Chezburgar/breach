@@ -232,11 +232,13 @@ export class Game {
       this.net.send({ t: 'leave' });
       this.leaveMatch();
     });
+    // Settings opens over the pause screen. It used to drop the player back
+    // to the main menu, which reads as having left the match.
     document.getElementById('pause-settings').addEventListener('click', () => {
-      this.paused = false;
+      this.menu.openSettings(() => {
+        document.getElementById('pause').classList.remove('hidden');
+      });
       document.getElementById('pause').classList.add('hidden');
-      this.menu.show();
-      document.querySelector('.tab[data-tab="settings"]').click();
     });
   }
 

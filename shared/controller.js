@@ -7,7 +7,7 @@
 
 import { BTN, MOVE, PLAYER, VIEW } from './constants.js';
 import { clamp, damp } from './mathx.js';
-import { cylinderBlocked, groundUnder, ceilingAbove, resolveCylinder } from './collision.js';
+import { cylinderBlocked, groundUnder, ceilingAbove, resolveCylinder, raycastWorld } from './collision.js';
 
 export function createPlayerState(spawn) {
   return {
@@ -34,9 +34,25 @@ export function createPlayerState(spawn) {
   };
 }
 
-/** Eye position for a given state. */
+/**
+ * Eye position for a given state, including the lean.
+ *
+ * The lean has to live here rather than in the client's camera code. Shots
+ * leave the eye, and if the camera slides out from behind cover while the
+ * muzzle stays on the body's centre line, the crosshair stops agreeing with
+ * where the round actually goes — you line a target up in the middle of the
+ * screen and miss by the width of the lean. Putting it in the state means
+ * the view, the client's prediction and the server's hitscan all use the
+ * same eye.
+ */
 export function eyePosition(s) {
-  return { x: s.pos.x, y: s.pos.y + s.height - PLAYER.eyeDrop, z: s.pos.z };
+  const off = (s.lean || 0) * MOVE.leanOffset;
+  const drop = Math.abs(s.lean || 0) * MOVE.leanDrop;
+  return {
+    x: s.pos.x + Math.cos(s.yaw) * off,
+    y: s.pos.y + s.height - PLAYER.eyeDrop - drop,
+    z: s.pos.z - Math.sin(s.yaw) * off,
+  };
 }
 
 function moveHorizontal(world, s, dx, dz, radius) {
@@ -79,6 +95,23 @@ export function stepPlayer(s, cmd, world, dt) {
   // --- Lean -------------------------------------------------------------
   s.leanTarget = (btn & BTN.LEAN_R ? 1 : 0) - (btn & BTN.LEAN_L ? 1 : 0);
   s.lean = damp(s.lean, s.leanTarget, 13, dt);
+
+  // Leaning must not push the eye through a wall, and the clamp has to be
+  // part of the simulation rather than a client-side nicety: if the client
+  // stops the lean short and the server does not, their eyes — and so their
+  // shots — end up in different places.
+  if (Math.abs(s.lean) > 1e-3) {
+    const head = { x: s.pos.x, y: s.pos.y + s.height - PLAYER.eyeDrop, z: s.pos.z };
+    const sign = Math.sign(s.lean);
+    const dir = { x: Math.cos(s.yaw) * sign, y: 0, z: -Math.sin(s.yaw) * sign };
+    const clearance = R * 0.6;
+    const reach = Math.abs(s.lean) * MOVE.leanOffset + clearance;
+    const hit = raycastWorld(world, head, dir, reach);
+    if (hit) {
+      const room = Math.max(0, hit.t - clearance) / MOVE.leanOffset;
+      s.lean = sign * Math.min(Math.abs(s.lean), room);
+    }
+  }
 
   // --- Crouch / stance --------------------------------------------------
   const headroom = ceilingAbove(world, s.pos.x, s.pos.z, R, s.pos.y + s.height - 0.05, s.pos.y + PLAYER.standHeight + 0.1);
