@@ -643,8 +643,22 @@ export class Game {
    * back on the player's next click, which is a gesture the browser accepts.
    */
   onLockChange(locked) {
-    if (locked || !this.inMatch || this.paused || this.phase === PHASE.OUTRO) return;
+    if (locked) { this.cursorFree = false; return; }
+    // Given up on purpose: leave it given up until the player says otherwise.
+    if (this.cursorFree || !this.inMatch || this.paused || this.phase === PHASE.OUTRO) return;
     this.armRelock();
+  }
+
+  /** Free the mouse, or take it back as the crosshair. */
+  toggleCursor() {
+    if (this.input.locked) {
+      this.cursorFree = true;
+      this.input.releaseLock();
+      this.hud.toast('MOUSE FREE — L TO AIM AGAIN', 1800);
+    } else {
+      this.cursorFree = false;
+      this.input.requestLock();
+    }
   }
 
   armRelock() {
@@ -668,6 +682,7 @@ export class Game {
   resume() {
     this.paused = false;
     document.getElementById('pause').classList.add('hidden');
+    this.cursorFree = false;
     this.input.requestLock();
   }
 
@@ -679,6 +694,11 @@ export class Game {
       if (this.paused) this.resume();
       else this.pause();
     }
+
+    // Hand the mouse back, or take it again. Deliberately letting go is not
+    // the same as losing the pointer to a stray click, so it also disarms
+    // the listener that would otherwise grab it back on the next press.
+    if (input.wasPressed('cursor')) this.toggleCursor();
 
     const wantBoard = input.isDown('scoreboard');
     if (wantBoard !== this.scoreboardOpen) {
