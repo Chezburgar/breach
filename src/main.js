@@ -187,6 +187,28 @@ async function main() {
   audio.setVolume('sfx', profile.settings.sfxVolume);
   audio.setVolume('music', profile.settings.musicVolume);
 
+  // Full screen. Offered whenever the page is not already full screen, and
+  // it hands the pointer straight back afterwards so clicking it mid-match
+  // does not leave the player looking at a cursor.
+  const fsBtn = document.getElementById('fullscreen-btn');
+  const syncFullscreen = () => {
+    fsBtn.classList.toggle('hidden', !!document.fullscreenElement);
+  };
+  fsBtn.addEventListener('click', async () => {
+    audio.unlock();
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch (err) {
+      menu.toast('This browser refused full screen.', true);
+      console.warn(err);
+    }
+    fsBtn.blur();
+    if (game.inMatch && !game.paused) game.input.requestLock();
+  });
+  document.addEventListener('fullscreenchange', syncFullscreen);
+  syncFullscreen();
+
   await progress(1.0, 'ready');
   boot.classList.add('hidden');
   menu.show();

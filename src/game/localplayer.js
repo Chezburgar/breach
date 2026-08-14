@@ -390,25 +390,10 @@ export class LocalPlayer {
     const eye = eyePosition(this.state);
     const right = { x: Math.cos(this.yaw), y: 0, z: -Math.sin(this.yaw) };
 
-    // Leaning slides the camera sideways, which will happily push it through a
-    // wall and let you see into the next room. Sweep the offset and stop short
-    // of anything solid, then roll by however much lean actually survived.
-    const wanted = this.state.lean * MOVE.leanOffset;
-    let offset = wanted;
-    if (Math.abs(wanted) > 1e-3) {
-      const s = Math.sign(wanted);
-      const dir = { x: right.x * s, y: 0, z: right.z * s };
-      const clearance = PLAYER.radius * 0.6;
-      const hit = raycastWorld(this.world, eye, dir, Math.abs(wanted) + clearance);
-      if (hit) offset = s * Math.max(0, hit.t - clearance);
-    }
-    const leanFrac = MOVE.leanOffset > 1e-6 ? offset / MOVE.leanOffset : 0;
-
-    // A lean is a body movement, not a filter on the camera. Alongside the
-    // sideways slide and the roll, the head drops — you are pivoting about
-    // your waist, so going out to the side costs you height — and the whole
-    // thing eases rather than snapping to the key.
-    const leanDrop = Math.abs(leanFrac) * MOVE.leanDrop;
+    // The slide and the drop are already in `eye`: the controller applies
+    // them, clamped against the world, so the camera and the muzzle share one
+    // position. All that is left here is the roll.
+    const leanFrac = this.state.lean;
 
     // Step smoothing. The controller lifts the body onto a stair riser in a
     // single tick — correct for collision, but carried straight to the eye it
@@ -427,9 +412,9 @@ export class LocalPlayer {
     this.stepLag = damp(this.stepLag || 0, 0, 15, dt);
 
     camera.position.set(
-      eye.x + this.correction.x + right.x * offset + this.viewBob.x,
-      eye.y + this.correction.y - this.stepLag - this.landDip * 0.16 - leanDrop + this.viewBob.y,
-      eye.z + this.correction.z + right.z * offset
+      eye.x + this.correction.x + this.viewBob.x,
+      eye.y + this.correction.y - this.stepLag - this.landDip * 0.16 + this.viewBob.y,
+      eye.z + this.correction.z
     );
 
     camera.rotation.order = 'YXZ';

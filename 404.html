@@ -257,6 +257,21 @@
     </div>
   </div>
 
+  <!-- Settings, opened over whatever is on screen. The panel itself is
+       moved in from the menu rather than duplicated, so there is only ever
+       one set of controls and one set of listeners. -->
+  <div id="settings-modal" class="overlay settings-modal hidden">
+    <div class="sm-inner">
+      <div class="sm-head"><h2>SETTINGS</h2><button class="btn" id="settings-close">CLOSE</button></div>
+      <div class="sm-body" id="settings-host"></div>
+    </div>
+  </div>
+
+  <button id="fullscreen-btn" class="fullscreen-btn" title="Full screen">
+    <svg viewBox="0 0 24 24"><path d="M4 9V4h5v2H6v3zm11-5h5v5h-2V6h-3zM6 15v3h3v2H4v-5zm12 0h2v5h-5v-2h3z"/></svg>
+    <span>FULL SCREEN</span>
+  </button>
+
   <div id="toasts" class="toasts"></div>
 
   <!-- PeerJS handles WebRTC signalling; it only ships a global browser build. -->
