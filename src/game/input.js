@@ -11,7 +11,10 @@ export const DEFAULT_BINDS = {
   primary: 'Digit1', secondary: 'Digit2', fireMode: 'KeyB',
   grenade: 'KeyG', nade1: 'Digit3', nade2: 'Digit4', nade3: 'Digit5',
   drone: 'KeyZ', scan: 'KeyX',
-  scoreboard: 'Tab', chat: 'Enter', menu: 'Escape',
+  // P, not Escape. Escape is the browser's own key for releasing the
+  // pointer and cannot be intercepted, so binding the pause menu to it made
+  // the two fight: one press, two unrelated things.
+  scoreboard: 'Tab', chat: 'Enter', menu: 'KeyP', cursor: 'KeyL',
 };
 
 export class Input {
@@ -39,8 +42,15 @@ export class Input {
       this.listeners.push(() => target.removeEventListener(type, fn, opts));
     };
 
+    // Typing somewhere is not playing. Without this, freeing the mouse to
+    // change a setting and then typing a name would fire half the binds.
+    const typing = (e) => {
+      const t = e.target;
+      return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    };
+
     add(window, 'keydown', (e) => {
-      if (e.repeat) return;
+      if (e.repeat || typing(e)) return;
       // Never swallow the browser's own shortcuts.
       if (e.ctrlKey && e.code !== 'ControlLeft') return;
       if (this.enabled && this.shouldCapture(e.code)) e.preventDefault();
