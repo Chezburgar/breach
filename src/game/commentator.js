@@ -1,111 +1,60 @@
-// The pre-game announcer.
+// The commentary booth.
 //
-// Reads the rosters over the fly-through: "On Vanguard we have …, and on
-// Sentinel we've got …".
+// Real recordings, played from /assets/vo. Two personas were supplied — an
+// analyst and an Aussie colour commentator — and the booth alternates between
+// them so consecutive lines sound like two people rather than one on a loop.
 //
-// There are two voices behind this, and it prefers the good one:
+// Lines are chosen by *slot*, not by name: the intro wants a monologue that
+// can run under the fly-through, the beats inside a round want something
+// short. Nothing here reads a player's name, because no recording can say a
+// name it has never heard and stitching one in from a synthesiser sounded
+// worse than not saying it at all.
 //
-//   1. Recorded clips from /assets/vo. Real audio, however it was produced —
-//      a human at a microphone or a neural TTS run offline. Names are their
-//      own clips so the frame phrases and the roster can be recombined for
-//      any line-up, which is how sports games have always done it.
-//   2. The browser's speech synthesiser, for anything with no clip. It sounds
-//      synthetic, but it can pronounce a name it has never seen, which no
-//      recording can — so it is the floor rather than the ceiling.
-//
-// Lines are *chained*, not scheduled: each waits for the one before it to
-// finish. Fixed delays cut the second roster off whenever the names ran long.
+// Everything is data. Reslot a clip in manifest.json and it moves; add clips
+// and they join the pool. There is no list of ids in this file.
 
 const VO_DIR = new URL('../../assets/vo/', import.meta.url);
-
-/** Names read aloud, not spelled out. */
-export function sayable(name) {
-  return String(name || '')
-    .replace(/[_\-.]+/g, ' ')
-    .replace(/(\D)(\d{1,4})$/, '$1')          // trailing lobby digits
-    .replace(/([a-z])([A-Z])/g, '$1 $2')      // camel case is two words
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .replace(/\s+/g, ' ')
-    .trim() || 'Operator';
-}
-
-/** The id a recorded clip would have. */
-export const clipId = (text) =>
-  String(text).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-
-/** "a, b, c and d" — the join an announcer actually uses. */
-export function readList(names) {
-  if (!names.length) return 'nobody';
-  if (names.length === 1) return names[0];
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
 
 export class Commentator {
   constructor(settings, audio) {
     this.settings = settings || {};
     this.audio = audio || null;
-    this.synth = typeof speechSynthesis !== 'undefined' ? speechSynthesis : null;
-    this.voice = null;
     this.enabled = true;
-    this.clips = new Map();      // id -> url
-    this.queue = [];
-    this.busy = false;
-    this.token = 0;              // cancels anything still queued from before
-
-    this.pickVoice();
-    this.synth?.addEventListener?.('voiceschanged', () => this.pickVoice());
-    this.loadManifest();
+    this.bySlot = new Map();     // slot -> clips
+    this.lastId = new Map();     // slot -> last clip played
+    this.lastPersona = null;
+    this.token = 0;
+    this.playing = null;
+    this.ready = this.load();
   }
 
-  /** Recorded lines, if any have been dropped in. */
-  async loadManifest() {
+  async load() {
     try {
       const res = await fetch(new URL('manifest.json', VO_DIR), { cache: 'no-cache' });
       if (!res.ok) return;
       const data = await res.json();
-      for (const entry of (Array.isArray(data) ? data : data.clips) || []) {
-        if (entry?.id && entry.file) {
-          this.clips.set(entry.id, new URL(entry.file, VO_DIR).href);
-        }
+      for (const c of (Array.isArray(data) ? data : data.clips) || []) {
+        if (!c?.file) continue;
+        const slot = c.slot || 'sting';
+        if (!this.bySlot.has(slot)) this.bySlot.set(slot, []);
+        this.bySlot.get(slot).push({ ...c, url: new URL(c.file, VO_DIR).href });
       }
     } catch {
-      // No manifest is the normal case; the synthesiser covers everything.
+      // No manifest: the booth is simply silent.
     }
-  }
-
-  /**
-   * Prefer a deep English voice. Scored rather than matched, because the names
-   * differ on every platform and a hard match finds nothing on most of them.
-   */
-  pickVoice() {
-    const all = this.synth?.getVoices?.() || [];
-    if (!all.length) return;
-    const score = (v) => {
-      const n = `${v.name} ${v.voiceURI}`.toLowerCase();
-      let s = 0;
-      if (/^en(-|_)?(gb|us|au)?/i.test(v.lang)) s += 10;
-      if (/\ben-gb\b/i.test(v.lang)) s += 3;
-      if (/(male|david|daniel|george|james|arthur|fred|alex|rishi)/.test(n)) s += 6;
-      if (/(natural|neural|premium|enhanced)/.test(n)) s += 5;
-      if (/(zira|female|samantha|karen|tessa|susan)/.test(n)) s -= 4;
-      if (/google/.test(n)) s += 2;
-      if (v.localService) s += 1;
-      return s;
-    };
-    this.voice = all.slice().sort((a, b) => score(b) - score(a))[0] || null;
   }
 
   setEnabled(on) {
     this.enabled = !!on;
-    if (!on) this.cancel();
+    if (!on) this.stop();
   }
 
-  cancel() {
+  stop() {
     this.token++;
-    this.queue.length = 0;
-    this.busy = false;
-    try { this.synth?.cancel(); } catch { /* not supported */ }
-    if (this.playing) { try { this.playing.stop(); } catch { /* ended */ } this.playing = null; }
+    if (this.playing) {
+      try { this.playing.stop(); } catch { /* already ended */ }
+      this.playing = null;
+    }
   }
 
   get volume() {
@@ -113,125 +62,72 @@ export class Commentator {
   }
 
   /**
-   * Say a sequence, each line waiting for the last to finish.
-   * @param lines `[{ text, clip }]` — `clip` names a recording to prefer.
+   * Pick a line for a slot.
+   *
+   * Two rules, both about not sounding like a machine: never the same clip
+   * twice running, and prefer the persona who did *not* speak last, so the
+   * booth feels like a pair trading lines.
    */
-  say(lines) {
-    if (!this.enabled) return;
-    this.cancel();
+  pick(slot, maxSeconds) {
+    let pool = this.bySlot.get(slot) || [];
+    if (maxSeconds) pool = pool.filter((c) => !c.seconds || c.seconds <= maxSeconds);
+    if (!pool.length) return null;
+
+    const last = this.lastId.get(slot);
+    let choices = pool.filter((c) => c.id !== last);
+    if (!choices.length) choices = pool;
+
+    const fresh = choices.filter((c) => c.persona && c.persona !== this.lastPersona);
+    if (fresh.length) choices = fresh;
+
+    const pickOne = choices[Math.floor(Math.random() * choices.length)];
+    this.lastId.set(slot, pickOne.id);
+    this.lastPersona = pickOne.persona || null;
+    return pickOne;
+  }
+
+  /**
+   * Play one line from a slot. Interrupts whatever is talking, because two
+   * commentators over each other is noise, not atmosphere.
+   * @returns the clip played, or null
+   */
+  async play(slot, { maxSeconds, delay = 0 } = {}) {
+    if (!this.enabled || !this.audio?.ready) return null;
+    await this.ready;
+    const clip = this.pick(slot, maxSeconds);
+    if (!clip) return null;
+
+    this.stop();
     const token = this.token;
-    this.queue = lines.filter(Boolean);
-    this.drain(token);
-  }
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay * 1000));
+    if (token !== this.token) return null;
 
-  async drain(token) {
-    if (token !== this.token) return;
-    const next = this.queue.shift();
-    if (!next) { this.busy = false; return; }
-    this.busy = true;
-    await this.utter(next, token);
-    if (token === this.token) this.drain(token);
-  }
-
-  /**
-   * One line. Played from recordings only if *every* fragment of it exists —
-   * a sentence that switches from a real voice to a synthetic one halfway
-   * through sounds worse than either voice alone.
-   */
-  async utter(line, token) {
-    const parts = line.parts || (line.clip ? [{ clip: line.clip }] : []);
-    const urls = parts.map((f) => f.clip && this.clips.get(f.clip));
-    if (parts.length && urls.every(Boolean) && this.audio?.ready) {
-      for (const url of urls) {
-        if (token !== this.token) return;
-        await this.playClip(url, token);
-      }
-      return;
+    try {
+      const buf = await this.audio.loadBuffer(clip.url);
+      if (token !== this.token) return null;
+      const src = this.audio.ctx.createBufferSource();
+      src.buffer = buf;
+      const gain = this.audio.ctx.createGain();
+      // Sits above the music: the booth is the thing you are meant to hear.
+      gain.gain.value = this.volume;
+      src.connect(gain); gain.connect(this.audio.music);
+      src.onended = () => { if (this.playing === src) this.playing = null; };
+      src.start();
+      this.playing = src;
+      return clip;
+    } catch {
+      return null;
     }
-    await this.speak(line.text, token);
   }
 
-  playClip(url, token) {
-    return new Promise((resolve) => {
-      this.audio.loadBuffer(url).then((buf) => {
-        if (token !== this.token) return resolve();
-        const src = this.audio.ctx.createBufferSource();
-        src.buffer = buf;
-        const g = this.audio.ctx.createGain();
-        g.gain.value = this.volume;
-        src.connect(g); g.connect(this.audio.music);
-        src.onended = () => { this.playing = null; resolve(); };
-        src.start();
-        this.playing = src;
-      }).catch(() => resolve());
-    });
+  /** Opens the match, under the fly-through. */
+  callIntro(seconds) {
+    return this.play('intro', { maxSeconds: seconds, delay: 0.6 });
   }
 
-  speak(text, token) {
-    return new Promise((resolve) => {
-      if (!text || typeof SpeechSynthesisUtterance === 'undefined' || !this.synth) {
-        return resolve();
-      }
-      const u = new SpeechSynthesisUtterance(text);
-      if (this.voice) u.voice = this.voice;
-      u.rate = 0.98;
-      u.pitch = 0.85;
-      u.volume = this.volume;
-      u.onend = resolve;
-      u.onerror = resolve;
-      // Some engines never fire onend; do not let the chain stall on it.
-      const guard = setTimeout(resolve, 2000 + text.length * 90);
-      const done = () => clearTimeout(guard);
-      u.addEventListener('end', done);
-      u.addEventListener('error', done);
-      if (token !== this.token) return resolve();
-      try { this.synth.speak(u); } catch { resolve(); }
-    });
-  }
+  /** A round begins or ends. */
+  callRound() { return this.play('round', { delay: 0.35 }); }
 
-  /**
-   * The roster call, as a chain so it always finishes whatever the line-up.
-   * Every fragment names a clip, so dropping recordings in upgrades the voice
-   * without touching this.
-   */
-  callRoster(players, teams, mapName) {
-    if (!this.enabled || !players?.length) return;
-    const named = (t) => players.filter((p) => p.team === t).map((p) => sayable(p.name));
-    const lines = [];
-
-    if (mapName) {
-      lines.push({ text: `${mapName}.`, parts: [{ clip: `map_${clipId(mapName)}` }] });
-    }
-
-    if (teams && teams.length >= 2) {
-      const side = (t) => t.name.charAt(0) + t.name.slice(1).toLowerCase();
-      const a = named(0), b = named(1);
-      // Fragments: the frame, then a clip per name, with "and" before the
-      // last. Recording every possible line-up is impossible, so the pieces
-      // are recorded once and recombined — the way sports games do it.
-      const roster = (frame, names) => [
-        { clip: frame },
-        ...names.flatMap((n, i) => (
-          i === names.length - 1 && names.length > 1
-            ? [{ clip: 'frame_and' }, { clip: `name_${clipId(n)}` }]
-            : [{ clip: `name_${clipId(n)}` }]
-        )),
-      ];
-      if (a.length) {
-        lines.push({
-          text: `On ${side(teams[0])}, we have ${readList(a)}.`,
-          parts: roster('frame_on_vanguard', a),
-        });
-      }
-      if (b.length) {
-        lines.push({
-          text: `And on ${side(teams[1])}, we've got ${readList(b)}.`,
-          parts: roster('frame_on_sentinel', b),
-        });
-      }
-    } else {
-      lines.push({ text: `In the arena: ${readList(players.map((p) => sayable(p.name)))}.` });
-    }
-    this.say(lines);
-  }
+  /** A short punctuation mark — a streak, a clutch, the final blow. */
+  callSting() { return this.play('sting', { delay: 0.2 }); }
 }
