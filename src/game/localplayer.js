@@ -10,6 +10,7 @@ import { BTN, FIXED_DT, MOVE, PLAYER, VIEW } from '../../shared/constants.js';
 import { createPlayerState, stepPlayer, eyePosition, applyState } from '../../shared/controller.js';
 import { raycastWorld } from '../../shared/collision.js';
 import { currentSpread, recoilAt, resolveWeapon } from '../../shared/weapons.js';
+import { sanitizeAbility } from '../../shared/abilities.js';
 import { clamp, damp, dirFromAngles, hashString, makeRng } from '../../shared/mathx.js';
 
 const DEG = Math.PI / 180;
@@ -72,13 +73,21 @@ export class LocalPlayer {
       reserve: loadout.secondary.reserve ?? resolveWeapon(loadout.secondary).reserve,
     };
     this.slot = 'primary';
+    // Spawn and loadout arrive in either order, so both stamp the ability on
+    // the prediction state. Miss it and the controller silently refuses to
+    // dash locally, and every use arrives a round-trip late from the server.
+    if (this.state) this.state.ability = sanitizeAbility(loadout?.ability);
   }
 
   get weapon() { return this.weapons[this.slot]; }
   get rw() { return this.weapon?.rw; }
 
   spawn(pos, yaw) {
-    this.state = createPlayerState({ p: [pos[0], pos[1], pos[2]], yaw });
+    // The prediction state needs the same ability the server gave us, or the
+    // controller will refuse to dash locally and every use will rubber-band
+    // in from the server a round-trip late.
+    this.state = createPlayerState({ p: [pos[0], pos[1], pos[2]], yaw },
+      sanitizeAbility(this.loadout?.ability));
     this.yaw = yaw;
     this.pitch = 0;
     this.alive = true;

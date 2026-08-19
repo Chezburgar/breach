@@ -6,10 +6,11 @@
 // prediction will disagree with the server and the player will rubber-band.
 
 import { BTN, MOVE, PLAYER, VIEW } from './constants.js';
+import { getAbility, applyMoveAbility } from './abilities.js';
 import { clamp, damp } from './mathx.js';
 import { cylinderBlocked, groundUnder, ceilingAbove, resolveCylinder, raycastWorld } from './collision.js';
 
-export function createPlayerState(spawn) {
+export function createPlayerState(spawn, ability = null) {
   return {
     pos: { x: spawn?.p?.[0] ?? 0, y: spawn?.p?.[1] ?? 2, z: spawn?.p?.[2] ?? 0 },
     vel: { x: 0, y: 0, z: 0 },
@@ -28,6 +29,13 @@ export function createPlayerState(spawn) {
     sprinting: false,
     speed: 0,
     stepDist: 0,        // distance travelled on foot, drives footstep audio
+    // Abilities. The clock lives on the state so prediction and authority
+    // share it — a cooldown the client cannot see is a cooldown it cannot
+    // predict, and every dash would rubber-band.
+    time: 0,
+    ability,             // id of the equipped ability
+    abilityReadyAt: 0,
+    abilityFired: 0,     // set for one frame when a movement ability goes off
     landImpact: 0,      // downward speed at the moment of landing (one frame)
     fallDamage: 0,      // damage owed from the last landing (one frame)
     wasOnGround: false,
@@ -160,6 +168,24 @@ export function stepPlayer(s, cmd, world, dt) {
     wz = fz * wantFwd + rz * wantRight;
     const l = Math.hypot(wx, wz);
     if (l > 1e-6) { wx /= l; wz /= l; }
+  }
+
+  // --- Abilities --------------------------------------------------------
+  // Movement abilities run here, inside the shared step, so the browser and
+  // the server apply them on the same input and agree about where you ended
+  // up. World abilities are the room's business and never touch this file.
+  s.time += dt;
+  s.abilityFired = 0;
+  if ((btn & BTN.ABILITY) && s.ability) {
+    const def = getAbility(s.ability);
+    if (def.kind === 'move' && s.time >= s.abilityReadyAt) {
+      if (applyMoveAbility(s, def, { x: wx, z: wz, fx: -sinY, fz: -cosY })) {
+        s.abilityReadyAt = s.time + def.cooldown;
+        s.abilityFired = 1;
+        s.sliding = false;
+        s.slideTime = 0;
+      }
+    }
   }
 
   // --- Acceleration -----------------------------------------------------

@@ -23,8 +23,10 @@ import { TrainingMode } from './training.js';
 import { GrenadeView } from './grenades.js';
 import { DroneView, MarkView } from './drone.js';
 import { IntroCamera } from './introcam.js';
+import { AbilityView } from './abilityview.js';
 import { Commentator } from './commentator.js';
 import { DRONE } from '../../shared/drone.js';
+import { ABILITIES, getAbility } from '../../shared/abilities.js';
 import { GRENADE_IDS, GRENADE_COOLDOWN, getGrenade } from '../../shared/grenades.js';
 import { saveProfile } from '../ui/menu.js';
 
@@ -56,6 +58,7 @@ export class Game {
     this.remotes = new RemoteManager(this.renderer.scene);
     this.grenadeView = new GrenadeView(this.renderer.scene, this.effects, this.audio);
     this.introCam = new IntroCamera();
+    this.abilityView = new AbilityView(this.renderer.scene);
     this.commentator = new Commentator(profile.settings, audio);
     this.droneView = new DroneView(this.renderer.scene);
     this.markView = new MarkView(this.renderer.scene);
@@ -189,6 +192,15 @@ export class Game {
       this.blindUntil = performance.now() / 1000 + msg.duration;
       this.audio.tinnitus(msg.duration);
     });
+    net.on('ability.pulse', (msg) => {
+      this.abilityView.pulse(msg.p, msg.radius, msg.team);
+      this.audio.click(msg.by === net.id ? 'ui' : 'reload');
+    });
+    net.on('ability.used', (msg) => {
+      this.abilityReady = msg.cooldown;
+      this.audio.click('reload');
+    });
+    net.on('placeables', (msg) => this.abilityView.sync(msg.list || []));
     net.on('drone.start', (msg) => {
       this.pilotId = msg.id;
       this._droneYaw = Number.isFinite(msg.yaw) ? msg.yaw : (this.local?.yaw ?? 0);
@@ -412,6 +424,11 @@ export class Game {
 
     this.droneRows = msg.dr || [];
     this.myDroneId = msg.mine || null;
+    if (msg.ab) {
+      this.abilityId = msg.ab.id || this.abilityId;
+      this.abilityReady = msg.ab.ready || 0;
+    }
+    this.abilityView.sync(msg.pl || []);
     this.marks = msg.mk || [];
     // The server is the authority on whether we are still driving: losing
     // the drone, dying, or the round ending all end it the same way.
@@ -582,6 +599,7 @@ export class Game {
 
   leaveMatch() {
     this.commentator.stop();
+    this.abilityView.clear();
     this.inMatch = false;
     this.phase = PHASE.NONE;
     this.match = null;
@@ -757,6 +775,13 @@ export class Game {
     }
     if (this.grenadeEquipped && input.takeMouseClick()) this.throwGrenade();
 
+    if (input.wasPressed('ability') && this.local?.alive && !this.pilotId) {
+      const def = ABILITIES[this.abilityId];
+      // Movement abilities travel in the input bits and are predicted; world
+      // ones are the room's to place, so they are asked for.
+      if (def && def.kind === 'world') this.net.send({ t: 'ability' });
+    }
+
     if (input.wasPressed('use') && this.training) {
       if (this.training.takeNearbyWeapon(this.local)) this.audio.click();
     }
@@ -918,6 +943,7 @@ export class Game {
     this.viewmodel.holder.visible = this.local.alive && !this.pilotId;
     if (this.pilotId) this.droneView.setHidden(this.pilotId, true);
     this.grenadeView.update(dt);
+    this.abilityView.update(dt);
     this.droneScanReady = Math.max(0, this.droneScanReady - dt);
 
     this.droneView.sync(this.droneRows, dt);
@@ -1120,6 +1146,9 @@ export class Game {
       grenadeStock: this.grenadeStock,
       droneUsed: this.droneUsed,
       droneParked: !!this.myDroneId && !this.pilotId,
+      ability: this.abilityId,
+      abilityDef: this.abilityId ? getAbility(this.abilityId) : null,
+      abilityReady: this.abilityReady,
       dronePiloting: !!this.pilotId,
       droneScanCooldown: this.droneScanReady,
       droneScanMax: DRONE.scanCooldown,

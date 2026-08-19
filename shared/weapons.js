@@ -5,6 +5,7 @@
 // predict recoil and build the view model.
 
 import { hashString, makeRng, clamp } from './mathx.js';
+import { sanitizeAbility } from './abilities.js';
 
 // --- Optics -------------------------------------------------------------
 // `mag` drives the true ADS field of view, so every scope below is a working
@@ -294,7 +295,12 @@ export function sanitizeLoadout(l) {
       laser: LASERS[given.laser] ? given.laser : 'none',
     };
   };
-  return { primary: fix('primary', l?.primary), secondary: fix('secondary', l?.secondary) };
+  return {
+    primary: fix('primary', l?.primary),
+    secondary: fix('secondary', l?.secondary),
+    // One ability per operator, kept with the guns so a loadout is one object.
+    ability: sanitizeAbility(l?.ability),
+  };
 }
 
 /** Fold attachments into a flat set of numbers the runtime can use directly. */

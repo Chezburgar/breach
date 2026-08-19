@@ -10,6 +10,7 @@ import { hasLineOfSight } from '../collision.js';
 import { eyePosition } from '../controller.js';
 import { anglesFromDir, angleDelta, clamp, vdist, vsub, vnorm } from '../mathx.js';
 import { PRIMARIES, SECONDARIES } from '../weapons.js';
+import { ABILITY_IDS, getAbility } from '../abilities.js';
 import { BANNERS, DEFAULT_FANFARE, BUILTIN_FANFARES } from '../cosmetics.js';
 import { findPath, nearestNode, nearestReachableNode } from './nav.js';
 
@@ -86,6 +87,9 @@ export class Bot {
         laser: 'none',
       },
       secondary: { id: secondary.id, scope: secondary.defaultScope, muzzle: 'none', grip: 'none', laser: 'none' },
+      // Bots draw from the same pool players do, so a match shows the whole
+      // set rather than whichever one happened to be coded for.
+      ability: ABILITY_IDS[Math.floor(Math.random() * ABILITY_IDS.length)],
     };
 
     this.reset();
@@ -404,6 +408,28 @@ export class Bot {
       const slot = p.weapons[p.slot];
       if (slot && slot.mag < slot.rw.mag * 0.35 && slot.reserve > 0 && !this.target) {
         room.startReload(p);
+      }
+    }
+
+    // ---- Ability ---------------------------------------------------------
+    // Used on the beat it is for: a dash or vault to close ground, a shield or
+    // mine while nobody is looking, a pulse when the trail has gone cold.
+    if (live && p.state.time >= p.state.abilityReadyAt) {
+      const def = getAbility(p.state.ability);
+      const dist = this.target ? vdist(p.state.pos, this.target.state.pos) : Infinity;
+      let want = false;
+      if (def.kind === 'move') {
+        // Closing, or breaking a bad angle.
+        want = engaging && (dist > 16 || (dist < 6 && Math.random() < 0.02));
+      } else if (def.id === 'scanner') {
+        want = !this.target && !!this.lastKnown;
+      } else {
+        // Shield and mine are laid while there is nobody to shoot at.
+        want = !this.target && p.state.onGround && Math.random() < 0.012;
+      }
+      if (want) {
+        if (def.kind === 'move') btn |= BTN.ABILITY;
+        else room.useAbility(p);
       }
     }
 
