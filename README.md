@@ -15,7 +15,7 @@ Squads deploy together, and a short freeze period opens each round.
 
 ## The map
 
-**Blackmoor Estate.** Three routes run from the north gate to the south
+**Blackwood Estate.** Three routes run from the north gate to the south
 gardens: through the manor, around the chapel terrace, or through the stable
 yard. The manor is the centrepiece — a double-height great hall with a gallery
 ring around the void, two service stairwells running ground to roof, and

@@ -63,6 +63,7 @@ export class Commentator {
   /** Stop everything and forget what was waiting. */
   reset() {
     this.queue.length = 0;
+    this.starting = false;
     if (this.current) {
       try { this.current.stop(); } catch { /* already ended */ }
       this.current = null;
@@ -127,9 +128,18 @@ export class Commentator {
     this.queue.sort((a, b) => b.priority - a.priority || a.at - b.at);
   }
 
-  /** Start the next line if nothing is talking. */
+  /**
+   * Start the next line if nothing is talking.
+   *
+   * `starting` is not redundant with `current`. Decoding the clip is
+   * asynchronous, so between the guard below and the moment a source is
+   * actually assigned there is an await — and two events arriving inside that
+   * window would both pass the guard and both start playing. That is exactly
+   * what a kill landing as a round ends does, and it is why the elimination
+   * and round-won lines talked over each other.
+   */
   async pump() {
-    if (!this.enabled || this.current || !this.audio?.ready) return;
+    if (!this.enabled || this.starting || this.current || !this.audio?.ready) return;
     if (this.now < this.freeAt) {
       setTimeout(() => this.pump(), (this.freeAt - this.now) * 1000);
       return;
@@ -143,9 +153,11 @@ export class Commentator {
     const next = this.queue.shift();
     if (!next) return;
 
+    // Claimed synchronously, before the first await.
+    this.starting = true;
     try {
       const buf = await this.audio.loadBuffer(next.clip.url);
-      if (!this.enabled) return;
+      if (!this.enabled) { this.starting = false; return; }
       const src = this.audio.ctx.createBufferSource();
       src.buffer = buf;
       const gain = this.audio.ctx.createGain();
@@ -158,9 +170,11 @@ export class Commentator {
       };
       src.start();
       this.current = src;
+      this.starting = false;
       this.lastPlayed = next.clip.id;
     } catch {
       this.current = null;
+      this.starting = false;
       this.pump();
     }
   }

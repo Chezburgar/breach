@@ -36,7 +36,7 @@ const GROUND_HOLES = [STAIR_MANOR, STAIR_GROTTO];
 export function buildEstate() {
   const b = new MapBuilder({
     id: 'estate',
-    name: 'Blackmoor Estate',
+    name: 'Blackwood Estate',
     tagline: 'Private grounds · 17:20 local',
     bounds: { min: [-92, -12, -92], max: [92, 40, 92] },
     ambience: 'evening',
