@@ -24,7 +24,7 @@ export const DEFAULT_MAP = 'estate';
 export const MAP_INFO = {
   estate: {
     id: 'estate',
-    name: 'Blackmoor Estate',
+    name: 'Blackwood Estate',
     blurb: 'A walled country estate. Three routes from the gate to the gardens, a manor that overlooks all of them, and a cellar that cuts underneath.',
     size: '176 × 176 m',
   },
