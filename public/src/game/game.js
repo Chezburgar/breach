@@ -56,7 +56,7 @@ export class Game {
     this.remotes = new RemoteManager(this.renderer.scene);
     this.grenadeView = new GrenadeView(this.renderer.scene, this.effects, this.audio);
     this.introCam = new IntroCamera();
-    this.commentator = new Commentator(profile.settings);
+    this.commentator = new Commentator(profile.settings, audio);
     this.droneView = new DroneView(this.renderer.scene);
     this.markView = new MarkView(this.renderer.scene);
 
@@ -334,7 +334,6 @@ export class Game {
 
     if (prev === PHASE.INTRO && this.phase !== PHASE.INTRO) {
       this.introCam.end();
-      this.commentator.cancel();
       this.hud.hideIntro();
       this.audio.stopIntroBed();
     }
@@ -974,7 +973,9 @@ export class Game {
 
     if (this.phase === PHASE.INTRO) {
       this.hud.updateIntroCount(this.phaseRemaining);
-      this.introCamera(dt);
+      // The camera belongs to the fly-through here; the old orbit ran after it
+      // every frame and overwrote it, so the intro never changed.
+      if (!this.introCam.active) this.introCamera(dt);
     } else if (this.phase === PHASE.WARMUP) {
       const secs = Math.ceil(this.phaseRemaining);
       if (secs !== this.lastCountdownBeep && secs <= 5 && secs > 0) {
