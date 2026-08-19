@@ -8,6 +8,9 @@ import { buildWorld, raycastWorld, rayPlayer, raySphere, hasLineOfSight } from '
 import { createPlayerState, stepPlayer, eyePosition } from '../controller.js';
 import { getMap } from '../maps/index.js';
 import { zoneAt } from '../maps/builder.js';
+import {
+  createCashoutState, stepCashout, tryPickup, tryDeposit, cashResult, CASH,
+} from './cashout.js';
 import { getMode } from '../modes.js';
 import {
   resolveWeapon, currentSpread, damageAt, getWeapon, sanitizeLoadout,
@@ -47,8 +50,11 @@ export class GameRoom {
     this.time = 0;
     this.phase = 'lobby';
     this.phaseEnds = 0;
-    this.scores = [0, 0];
-    this.teamCounts = [0, 0];
+    // Sized by the mode: Breach is a pair, Cashout is four crews.
+    this.teamCount = this.mode.teams ? (this.mode.teamCount || 2) : 0;
+    this.scores = new Array(Math.max(2, this.teamCount)).fill(0);
+    this.teamCounts = new Array(Math.max(2, this.teamCount)).fill(0);
+    this.cash = this.mode.cashout ? createCashoutState(this.mode, this.mapData) : null;
     this.snapAccum = 0;
     this.pendingEvents = [];
     this.disposed = false;
@@ -84,6 +90,8 @@ export class GameRoom {
       roundsToWin: this.mode.roundsToWin,
       maxRounds: this.mode.maxRounds,
       roundTime: this.mode.roundTime,
+      cashGoal: this.mode.cashGoal || 0,
+      objectives: this.mode.cashout ? this.mapData.objectives : null,
       intro: MATCH.introDuration,
       players: roster,
     });
@@ -123,15 +131,47 @@ export class GameRoom {
   }
 
   // -------------------------------------------------------------- players
+  /**
+   * Change mode before the match starts, rebuilding everything that was sized
+   * from the old one. Team count, score arrays and the objective state are all
+   * mode-shaped, and the lobby picks the mode long after the room exists.
+   */
+  setMode(id) {
+    const next = getMode(id);
+    if (next === this.mode) return;
+    this.mode = next;
+    this.teamCount = next.teams ? (next.teamCount || 2) : 0;
+    const width = Math.max(2, this.teamCount);
+    this.scores = new Array(width).fill(0);
+    this.teamCounts = new Array(width).fill(0);
+    this.cash = next.cashout ? createCashoutState(next, this.mapData) : null;
+    // Re-seat everyone: a four-crew mode cannot run with people still holding
+    // team ids handed out when there were only two.
+    const list = [...this.players.values()];
+    for (const p of list) p.team = -1;
+    for (const p of list) {
+      p.team = next.teams ? this.nextPartyTeam() : -1;
+      if (p.team >= 0) this.teamCounts[p.team]++;
+    }
+  }
+
+  /** The emptiest crew — the only sane way to place someone across four. */
   nextPartyTeam() {
-    return this.teamCounts[0] <= this.teamCounts[1] ? 0 : 1;
+    let best = 0;
+    for (let t = 1; t < this.teamCount; t++) {
+      if (this.teamCounts[t] < this.teamCounts[best]) best = t;
+    }
+    return best;
+  }
+
+  /** How many bots to add so every crew is full. */
+  fillTarget() {
+    return this.mode.teams ? this.teamCount * this.mode.teamSize : this.mode.maxPlayers;
   }
 
   addClient(client, forcedTeam) {
     if (client.room) client.room.removeClient(client, 'switched');
-    const team = this.mode.teams
-      ? (forcedTeam ?? (this.teamCounts[0] <= this.teamCounts[1] ? 0 : 1))
-      : -1;
+    const team = this.mode.teams ? (forcedTeam ?? this.nextPartyTeam()) : -1;
     const p = this.makePlayer({
       id: client.id,
       name: client.name,
@@ -255,7 +295,7 @@ export class GameRoom {
     for (let i = 0; i < want; i++) {
       const name = BOT_NAMES.find((n) => !used.has(n)) || `Bot${i}`;
       used.add(name);
-      const team = this.mode.teams ? (this.teamCounts[0] <= this.teamCounts[1] ? 0 : 1) : -1;
+      const team = this.mode.teams ? this.nextPartyTeam() : -1;
       const bot = new Bot(this, name);
       const p = this.makePlayer({
         id: `bot_${this.id}_${i}`,
@@ -297,7 +337,7 @@ export class GameRoom {
       matchTime: this.phase === 'live' ? left : this.mode.roundTime,
       scores: this.scores,
       round: this.roundNo,
-      alive: [this.aliveCount(0), this.aliveCount(1)],
+      alive: this.aliveByTeam(),
     };
   }
 
@@ -314,17 +354,25 @@ export class GameRoom {
 
     switch (this.phase) {
       case 'intro':
-        if (this.time >= this.phaseEnds) this.startRound();
+        if (this.time >= this.phaseEnds) {
+          if (this.mode.cashout) this.startCashout();
+          else this.startRound();
+        }
         break;
       case 'freeze':
         // Everyone is alive and placed; movement is locked until the buzzer.
         if (this.time >= this.phaseEnds) {
-          this.setPhase('live', this.mode.roundTime);
+          this.setPhase('live', this.mode.cashout ? this.mode.matchTime : this.mode.roundTime);
           this.broadcast({ t: 'round.live', round: this.roundNo });
         }
         break;
       case 'live':
-        if (this.time >= this.phaseEnds) this.finishRound(this.roundTimeoutWinner(), 'time');
+        if (this.mode.cashout) {
+          // No rounds: the match runs until the clock or the cash goal.
+          if (this.time >= this.phaseEnds) this.endMatch(this.matchResult());
+        } else if (this.time >= this.phaseEnds) {
+          this.finishRound(this.roundTimeoutWinner(), 'time');
+        }
         break;
       case 'roundend':
         if (this.time >= this.phaseEnds) {
@@ -366,13 +414,14 @@ export class GameRoom {
     }
 
     this.stepDrones(dt, live);
+    if (live && this.mode.cashout) this.stepCashoutRound(dt);
     if (live) this.stepProjectiles(dt);
     if (this.smokes.length) {
       this.smokes = this.smokes.filter((s) => this.time < s.until);
     }
 
     this.recordHistory();
-    if (live) this.checkRoundEnd();
+    if (live && !this.mode.cashout) this.checkRoundEnd();
 
     if (!this.players.size) {
       if (!this.emptySince) this.emptySince = this.time;
@@ -762,7 +811,9 @@ export class GameRoom {
     victim.health = 0;
     victim.deaths++;
     victim.streak = 0;
-    victim.respawnAt = 0;
+    // Cashout puts you back in; Breach does not, and that difference is the
+    // whole reason the two modes feel nothing alike.
+    victim.respawnAt = this.mode.respawn ? this.time + this.mode.respawnDelay : 0;
     victim.pendingReload = null;
     victim.spectating = true;
     // Spectate whoever on your side is still up.
@@ -805,7 +856,7 @@ export class GameRoom {
       streak: attacker ? attacker.streak : 0,
       assists,
       scores: this.scores,
-      alive: [this.aliveCount(0), this.aliveCount(1)],
+      alive: this.aliveByTeam(),
     });
 
     if (attacker && attacker !== victim && attacker.streak >= 3) {
@@ -1206,6 +1257,13 @@ export class GameRoom {
   }
 
   // ---------------------------------------------------------------- rounds
+  /** How many are still up, per crew. */
+  aliveByTeam() {
+    const out = [];
+    for (let t = 0; t < Math.max(2, this.teamCount); t++) out.push(this.aliveCount(t));
+    return out;
+  }
+
   aliveCount(team) {
     let n = 0;
     for (const p of this.players.values()) if (p.alive && p.team === team) n++;
@@ -1236,8 +1294,78 @@ export class GameRoom {
       scores: this.scores,
       freeze: this.mode.freezeTime,
       roundTime: this.mode.roundTime,
-      alive: [this.aliveCount(0), this.aliveCount(1)],
+      alive: this.aliveByTeam(),
     });
+  }
+
+  // ------------------------------------------------------------- cashout
+  /** Cashout has no rounds: everyone deploys once and the clock starts. */
+  startCashout() {
+    this.roundNo = 1;
+    for (let t = 0; t < this.teamCount; t++) {
+      const squad = [...this.players.values()].filter((q) => q.team === t);
+      if (!squad.length) continue;
+      const anchors = this.spawnCluster(t, squad.length);
+      squad.forEach((q, i) => this.respawnAt(q, anchors[i % anchors.length]));
+    }
+    this.cash.nextSpawnAt = this.time + 1;
+    this.setPhase('freeze', this.mode.freezeTime);
+    this.broadcast({
+      t: 'round.start', round: 1, scores: this.scores,
+      freeze: this.mode.freezeTime, roundTime: this.mode.matchTime,
+      alive: this.aliveByTeam(),
+    });
+  }
+
+  /** Respawn the dead, run the objective, and check for an outright win. */
+  stepCashoutRound(dt) {
+    for (const q of this.players.values()) {
+      if (q.alive || !q.respawnAt || this.time < q.respawnAt) continue;
+      const anchors = this.spawnCluster(q.team, 1);
+      this.respawnAt(q, anchors[0]);
+      this.send(q.client, { t: 'respawned' });
+    }
+
+    stepCashout(this.cash, this.mode, this.players.values(), this.time, dt, {
+      onBoxSpawn: (box) => this.broadcast({ t: 'cash.box', box: this.boxBrief(box), event: 'spawn' }),
+      onBoxDropped: (box) => this.broadcast({ t: 'cash.box', box: this.boxBrief(box), event: 'drop' }),
+      onSteal: (to, from) => this.broadcast({ t: 'cash.steal', team: to, from }),
+      onBanked: (team, terminal, total) => this.broadcast({
+        t: 'cash.banked', team, terminal: terminal.id, total, cash: this.cash.cash,
+      }),
+    });
+
+    this.scores = this.cash.cash;
+    if (cashResult(this.cash, this.mode).won) this.endMatch(this.matchResult());
+  }
+
+  boxBrief(box) {
+    if (!box) return null;
+    return {
+      id: box.id,
+      p: [round2(box.pos.x), round2(box.pos.y), round2(box.pos.z)],
+      carrier: box.carrier || null,
+      terminal: box.inTerminal || null,
+    };
+  }
+
+  /** F on the cashbox, or on a terminal while carrying it. */
+  cashInteract(p) {
+    if (!this.cash || this.phase !== 'live' || !p.alive) return;
+    const box = this.cash.box;
+    if (box && box.carrier === p.id) {
+      const t = tryDeposit(this.cash, this.mode, p, this.time);
+      if (t) {
+        this.broadcast({
+          t: 'cash.deposit', team: p.team, by: p.id, terminal: t.id,
+          seconds: round2(this.mode.cashoutTime),
+        });
+      }
+      return;
+    }
+    if (tryPickup(this.cash, p, this.time)) {
+      this.broadcast({ t: 'cash.box', box: this.boxBrief(this.cash.box), event: 'pickup' });
+    }
   }
 
   /** Round is over the moment one side has nobody left standing. */
@@ -1280,12 +1408,19 @@ export class GameRoom {
   }
 
   matchDecided() {
+    if (this.mode.cashout) return cashResult(this.cash, this.mode).won;
     return this.scores[0] >= this.mode.roundsToWin
       || this.scores[1] >= this.mode.roundsToWin
       || this.roundNo >= this.mode.maxRounds;
   }
 
   matchResult() {
+    if (this.mode.cashout) {
+      const res = cashResult(this.cash, this.mode);
+      const top = this.cash.cash[res.leader];
+      if (!top || this.cash.cash.filter((c) => c === top).length > 1) return { kind: 'draw' };
+      return { kind: 'team', team: res.leader };
+    }
     if (this.scores[0] === this.scores[1]) return { kind: 'draw' };
     return { kind: 'team', team: this.scores[0] > this.scores[1] ? 0 : 1 };
   }
@@ -1431,11 +1566,25 @@ export class GameRoom {
         ev: events,
         gr: grenadeState,
         dr: drones,
+        // The objective, compact enough to ride every snapshot: where the
+        // box is, which terminal is running, and how the crews stand.
+        co: this.cash ? {
+          box: this.boxBrief(this.cash.box),
+          act: this.cash.active ? {
+            t: this.cash.active.terminal.id,
+            team: this.cash.active.team,
+            left: round2(Math.max(0, this.cash.active.endsAt - this.time)),
+            by: this.cash.active.contestedBy,
+            steal: round2(this.cash.active.contestFor),
+          } : null,
+          cash: this.cash.cash,
+          next: this.cash.nextSpawnAt ? round2(Math.max(0, this.cash.nextSpawnAt - this.time)) : 0,
+        } : null,
         mk: this.marksFor(p.team),
         pilot: p.piloting ? (p.drone?.id || null) : null,
         mine: p.drone?.id || null,
         sc: this.scores,
-        alive: [this.aliveCount(0), this.aliveCount(1)],
+        alive: this.aliveByTeam(),
         round: this.roundNo,
         rem: Math.max(0, round2(this.phaseEnds - this.time)),
       };
@@ -1462,6 +1611,7 @@ export class GameRoom {
         if (p.inputQueue.length > 24) p.inputQueue.splice(0, p.inputQueue.length - 24);
         break;
       }
+      case 'interact': this.cashInteract(p); break;
       case 'reload': this.startReload(p); break;
       case 'switch': this.switchSlot(p, msg.slot); break;
       case 'melee': this.melee(p, p.cmd); break;

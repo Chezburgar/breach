@@ -164,7 +164,7 @@ export class Menu {
       card.className = 'mode-card';
       card.innerHTML =
         `<div class="short">${m.short}</div><h4>${m.name}</h4><p>${m.blurb}</p>` +
-        `<div class="meta">${m.teams ? '5V5' : 'FREE FOR ALL'} · UP TO ${m.maxPlayers}</div>`;
+        `<div class="meta">${m.teams ? `${m.teamCount || 2} X ${m.teamSize}` : 'FREE FOR ALL'} · UP TO ${m.maxPlayers}</div>`;
       card.addEventListener('click', (e) => {
         // A button keeps keyboard focus after a click, so Space re-fires it.
         // Dropping focus is what stops the whole thing being spammable from

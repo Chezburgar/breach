@@ -426,6 +426,11 @@ export class Bot {
     this.kickPitch *= settle;
     this.kickYaw *= settle;
 
+    // Cashout: grab the box, bank the box, hold the terminal. Checked every
+    // tick rather than on a timer because the room decides whether the reach
+    // actually lands — a bot spamming it at the wrong range costs nothing.
+    if (live && room.mode.cashout) room.cashInteract(p);
+
     p.cmd = {
       seq: (p.cmd?.seq || 0) + 1,
       btn,
@@ -588,6 +593,10 @@ export class Bot {
       return this.target.state.pos;
     }
 
+    // With nobody to shoot at, the money is the plan.
+    const objective = this.cashGoal();
+    if (objective) return objective;
+
     const exhausted = !this.path || this.pathIndex >= this.path.length;
     if (exhausted || this.goalTimer <= 0 || this.forceRepath) {
       this.forceRepath = false;
@@ -614,6 +623,53 @@ export class Bot {
       if (this.pathIndex >= this.path.length) { this.path = null; this.goalTimer = 0; }
     }
     return node.p;
+  }
+
+  /**
+   * Where the money is, from this bot's point of view.
+   *
+   * Carrying it beats everything: a crew that drops the box to go and fight
+   * never banks anything. After that it is whichever is live — a terminal
+   * running for someone else is worth more than a box nobody has picked up,
+   * because a steal is cheaper than a whole carry.
+   */
+  cashGoal() {
+    const room = this.room;
+    const st = room.cash;
+    if (!st) return null;
+    const p = this.player;
+
+    if (st.box?.carrier === p.id) {
+      const t = this.nearestTerminal(p.state.pos);
+      return t ? { x: t.p[0], y: t.p[1], z: t.p[2] } : null;
+    }
+
+    if (st.active) {
+      const t = st.active.terminal;
+      const mine = st.active.team === p.team;
+      // Defenders hold a little off the terminal so they are not all standing
+      // in one heap on it; everyone else goes straight for it.
+      const spread = mine ? 3.0 : 0;
+      const a = (this.seedOffset() % 6.28);
+      return {
+        x: t.p[0] + Math.cos(a) * spread,
+        y: t.p[1],
+        z: t.p[2] + Math.sin(a) * spread,
+      };
+    }
+
+    if (st.box && !st.box.carrier) return { ...st.box.pos };
+    return null;
+  }
+
+  nearestTerminal(from) {
+    const list = this.room.cash?.terminals || [];
+    let best = null, bestD = Infinity;
+    for (const t of list) {
+      const d = (t.p[0] - from.x) ** 2 + (t.p[2] - from.z) ** 2;
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best;
   }
 
   /** Nudge away from squadmates so bots do not pile onto one another. */
