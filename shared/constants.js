@@ -82,14 +82,9 @@ export const BTN = {
 
 // --- Teams --------------------------------------------------------------
 export const TEAM = { NONE: -1, ATTACK: 0, DEFEND: 1 };
-// Four squads. Breach only ever uses the first two — it is a 5v5 — but
-// Cashout puts four three-player crews on the map at once, and everything
-// that colours a team reads from this list rather than assuming a pair.
 export const TEAM_INFO = [
   { id: 0, key: 'attack', name: 'VANGUARD', color: '#ff6a3d', colorHex: 0xff6a3d, accent: '#ffb08a' },
   { id: 1, key: 'defend', name: 'SENTINEL', color: '#39b7ff', colorHex: 0x39b7ff, accent: '#9fddff' },
-  { id: 2, key: 'third',  name: 'MERIDIAN', color: '#5ee07a', colorHex: 0x5ee07a, accent: '#b6f2c4' },
-  { id: 3, key: 'fourth', name: 'OBSIDIAN', color: '#c98bff', colorHex: 0xc98bff, accent: '#e3c6ff' },
 ];
 
 // --- Damage -------------------------------------------------------------

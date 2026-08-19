@@ -35,6 +35,7 @@ export function loadProfile() {
       sfxVolume: 1.0,
       musicVolume: 0.7,
       showNameplates: true,
+      commentary: true,
       ...(saved.settings || {}),
     },
   };
@@ -164,7 +165,7 @@ export class Menu {
       card.className = 'mode-card';
       card.innerHTML =
         `<div class="short">${m.short}</div><h4>${m.name}</h4><p>${m.blurb}</p>` +
-        `<div class="meta">${m.teams ? `${m.teamCount || 2} X ${m.teamSize}` : 'FREE FOR ALL'} · UP TO ${m.maxPlayers}</div>`;
+        `<div class="meta">${m.teams ? '5V5' : 'FREE FOR ALL'} · UP TO ${m.maxPlayers}</div>`;
       card.addEventListener('click', (e) => {
         // A button keeps keyboard focus after a click, so Space re-fires it.
         // Dropping focus is what stops the whole thing being spammable from
@@ -486,6 +487,7 @@ export class Menu {
     slider('MUSIC VOLUME', 'musicVolume', 0, 1, 0.01, (v) => `${Math.round(v * 100)}`,
       (v) => this.audio?.setVolume('music', v));
     toggle('TEAMMATE NAMEPLATES', 'showNameplates');
+    toggle('PRE-GAME ANNOUNCER', 'commentary');
   }
 
   // ----------------------------------------------------------------- lobby
