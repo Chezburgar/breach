@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { FIXED_DT, MATCH, PLAYER, TEAM_INFO, VIEW } from '../../shared/constants.js';
 import { buildWorld } from '../../shared/collision.js';
+import { eyePosition } from '../../shared/controller.js';
 import { getMap, MAP_INFO } from '../../shared/maps/index.js';
 import { MODES, getMode } from '../../shared/modes.js';
 import { resolveWeapon, getWeapon, SCOPES } from '../../shared/weapons.js';
@@ -22,6 +23,7 @@ import { TrainingMode } from './training.js';
 import { GrenadeView } from './grenades.js';
 import { DroneView, MarkView } from './drone.js';
 import { CashView } from './cashview.js';
+import { IntroCamera } from './introcam.js';
 import { DRONE } from '../../shared/drone.js';
 import { GRENADE_IDS, GRENADE_COOLDOWN, getGrenade } from '../../shared/grenades.js';
 import { saveProfile } from '../ui/menu.js';
@@ -54,6 +56,7 @@ export class Game {
     this.remotes = new RemoteManager(this.renderer.scene);
     this.grenadeView = new GrenadeView(this.renderer.scene, this.effects, this.audio);
     this.cashView = new CashView(this.renderer.scene, this.lab);
+    this.introCam = new IntroCamera();
     this.droneView = new DroneView(this.renderer.scene);
     this.markView = new MarkView(this.renderer.scene);
 
@@ -329,6 +332,7 @@ export class Game {
     // Spectator-style intro: watch the map while the rosters are revealed.
     if (msg.intro > 0) {
       this.phase = PHASE.INTRO;
+    this.introCam.begin(this.mapData, msg.intro || MATCH.introDuration);
       this.phaseRemaining = msg.intro;
       this.hud.showIntro({ ...this.match, players: msg.players }, this.net.id);
       this.audio.startIntroBed();
@@ -365,6 +369,7 @@ export class Game {
     this.matchTimeLeft = Number.isFinite(msg.matchTime) ? msg.matchTime : this.matchTimeLeft;
 
     if (prev === PHASE.INTRO && this.phase !== PHASE.INTRO) {
+      this.introCam.end();
       this.hud.hideIntro();
       this.audio.stopIntroBed();
     }
@@ -956,7 +961,18 @@ export class Game {
       landDip: this.local.landDip,
     });
 
-    if (this.pilotId) {
+    if (this.phase === PHASE.INTRO && this.introCam.active) {
+      // The fly-through owns the camera until it lands on the player's eye.
+      const eye = this.local ? eyePosition(this.local.state) : null;
+      const settle = eye ? {
+        position: this._v.set(eye.x, eye.y, eye.z),
+        yaw: this.local.yaw,
+        pitch: this.local.pitch,
+      } : null;
+      if (!this.introCam.update(dt, this.camera, settle)) this.introCam.end();
+      this.vmCamera.position.copy(this.camera.position);
+      this.vmCamera.quaternion.copy(this.camera.quaternion);
+    } else if (this.pilotId) {
       this.updateDroneCamera();
     } else if (this.local.alive || this.phase === PHASE.INTRO) {
       this.local.updateCamera(this.camera, this.vmCamera, dt, this.scope);

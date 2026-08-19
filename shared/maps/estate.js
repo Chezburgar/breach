@@ -48,6 +48,19 @@ export function buildEstate() {
     fog: { color: 0x66748c, density: 0.0030 },
     envIntensity: 0.12,
     exposure: 0.30,
+
+    // The pre-game fly-through. Six shots that answer the only question a
+    // player has before a round: where am I, and what is between me and
+    // them. Gate, drive, court, manor face, roofline, gardens.
+    introFov: 56,
+    intro: [
+      { p: [0, 26, -104], at: [0, 9, -60] },      // in over the treeline
+      { p: [0, 14, -74], at: [0, 7, -50] },       // through the gatehouse arch
+      { p: [-22, 9, -46], at: [0, 4, -30] },      // across the front court
+      { p: [0, 6, -34], at: [0, 8, -8] },         // up the face of the manor
+      { p: [26, 20, -6], at: [0, 12, 6] },        // over the roofline
+      { p: [10, 12, 40], at: [-4, 2, 20] },       // down into the gardens
+    ],
   });
 
   ground(b);

@@ -63,7 +63,7 @@ async function main() {
       menu.connecting = true;
       menu.setSearching(true, { mode });
       try {
-        const res = await net.quickPlay();
+        const res = await net.quickPlay(mode);
         menu.toast(res.host
           ? `Hosting lobby ${res.code} — waiting for players`
           : `Joined lobby ${res.code}`);
@@ -162,7 +162,7 @@ async function main() {
   });
   net.on('status', ({ status, detail }) => {
     if (status === 'searching' || status === 'hosting' || status === 'connecting') {
-      menu.setSearching(true, { mode: 'breach', found: 0, wait: 0, detail });
+      menu.setSearching(true, { mode: net.pendingMode, found: 0, wait: 0, detail });
     }
   });
   net.on('close', () => menu.toast('Lost connection to the host.', true));
