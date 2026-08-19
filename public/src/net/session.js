@@ -656,10 +656,14 @@ export class Session {
     if (msg.t === 'group.config') {
       if (MODES[msg.mode]) this.pendingMode = msg.mode;
       if (Number.isFinite(msg.bots)) this.pendingBots = Math.max(0, Math.min(9, msg.bots | 0));
-      if (this.room && this.room.phase === 'lobby') this.room.mode = getMode(this.pendingMode);
+      if (this.room && this.room.phase === 'lobby') this.room.setMode(this.pendingMode);
       this.pushLobby();
     } else if (msg.t === 'group.start') {
-      this.startMatch(this.pendingBots);
+      // Fill to whatever the mode actually wants — Cashout needs twelve
+      // across four crews, not the ten a 5v5 asks for.
+      if (this.room) this.room.setMode(this.pendingMode);
+      const want = this.room ? this.room.fillTarget() : MATCH_TARGET;
+      this.startMatch(Math.max(this.pendingBots, want - this.clients.size));
     }
   }
 
@@ -726,7 +730,8 @@ export class Session {
       || (humans >= 1 && age >= LOBBY_FILL_WAIT);
 
     if (!ready) { this.pushLobby(); return; }
-    this.startMatch(Math.max(0, MATCH_TARGET - humans));
+    const want = this.room ? this.room.fillTarget() : MATCH_TARGET;
+    this.startMatch(Math.max(0, want - humans));
   }
 
   startMatch(bots) {
@@ -734,7 +739,7 @@ export class Session {
     clearInterval(this.lobbyTimer);
     this.lobbyTimer = null;
 
-    this.room.mode = getMode(this.pendingMode);
+    this.room.setMode(this.pendingMode);
     this.room.botCount = bots;
     // Teams are assigned as players are added, so add them in a stable order.
     for (const client of this.clients.values()) this.room.addClient(client);

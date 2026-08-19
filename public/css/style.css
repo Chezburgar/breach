@@ -770,3 +770,28 @@ h3 { font-size: 12px; color: var(--muted); }
 /* Out of the way while playing, but still reachable. */
 body.playing .fullscreen-btn { opacity: 0.12; }
 body.playing .fullscreen-btn:hover { opacity: 1; }
+
+/* Cashout. Four crews means the standings have to be readable at a glance,
+   so they sit under the timer rather than in the two-sided score strip. */
+.cash-hud { position: absolute; top: 74px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.cash-crews { display: flex; gap: 8px; }
+.cash-crew { display: flex; align-items: center; gap: 6px; padding: 3px 10px;
+  background: rgba(8, 11, 16, 0.62); border-top: 2px solid currentColor;
+  font-size: 12px; letter-spacing: 0.14em; }
+.cash-crew b { color: #fff; font-variant-numeric: tabular-nums; }
+.cash-crew.mine { background: rgba(20, 28, 38, 0.85); }
+.cash-term { width: 290px; padding: 6px 10px; background: rgba(8, 11, 16, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12); }
+.ct-head { display: flex; justify-content: space-between; font-size: 11px;
+  letter-spacing: 0.18em; color: var(--muted); }
+.ct-head b { color: #fff; }
+.ct-bar { height: 5px; margin-top: 5px; background: rgba(255, 255, 255, 0.12); }
+.ct-bar i { display: block; height: 100%; width: 0%; background: currentColor; transition: width 0.2s linear; }
+.ct-steal { margin-top: 4px; text-align: center; font-size: 10px; letter-spacing: 0.24em;
+  color: var(--attack); animation: dfblink 0.9s infinite; }
+.cash-prompt { position: absolute; left: 50%; bottom: 30%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; padding: 6px 13px;
+  background: rgba(8, 11, 16, 0.74); border: 1px solid rgba(255, 214, 122, 0.5);
+  font-size: 12px; letter-spacing: 0.2em; color: #ffe9b8; pointer-events: none; }
+.cash-prompt b { background: #ffd67a; color: #1a1206; border-radius: 2px; padding: 1px 7px; font-weight: 700; }

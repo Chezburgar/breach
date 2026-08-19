@@ -21,6 +21,7 @@ import { ScopeRenderer } from './scope.js';
 import { TrainingMode } from './training.js';
 import { GrenadeView } from './grenades.js';
 import { DroneView, MarkView } from './drone.js';
+import { CashView } from './cashview.js';
 import { DRONE } from '/shared/drone.js';
 import { GRENADE_IDS, GRENADE_COOLDOWN, getGrenade } from '/shared/grenades.js';
 import { saveProfile } from '../ui/menu.js';
@@ -52,6 +53,7 @@ export class Game {
     this.scope = new ScopeRenderer(this.renderer, this.renderer.scene, this.vmCamera);
     this.remotes = new RemoteManager(this.renderer.scene);
     this.grenadeView = new GrenadeView(this.renderer.scene, this.effects, this.audio);
+    this.cashView = new CashView(this.renderer.scene, this.lab);
     this.droneView = new DroneView(this.renderer.scene);
     this.markView = new MarkView(this.renderer.scene);
 
@@ -179,6 +181,38 @@ export class Game {
       this.blindUntil = performance.now() / 1000 + msg.duration;
       this.audio.tinnitus(msg.duration);
     });
+    // Cashout callouts. The mode turns on a handful of moments — the box
+    // appearing, someone starting a bank, someone taking it off them — and
+    // none of them are visible from wherever you happen to be standing.
+    net.on('cash.box', (msg) => {
+      this.cashBox = msg.box;
+      if (msg.event === 'pickup' && msg.box?.carrier === net.id) {
+        this.hud.toast('CASHBOX SECURED — F AT A TERMINAL', 2400);
+      } else if (msg.event === 'spawn') {
+        this.hud.toast('A CASHBOX HAS APPEARED', 2000);
+      }
+      this.audio.click(msg.event === 'drop' ? 'error' : 'ui');
+    });
+    net.on('cash.deposit', (msg) => {
+      const name = this.match?.teams?.[msg.team]?.name || 'A CREW';
+      this.hud.roundBanner(
+        msg.team === this.myTeam ? 'CASHING OUT' : name + ' IS CASHING OUT',
+        'HOLD THE TERMINAL', 2600);
+    });
+    net.on('cash.steal', (msg) => {
+      const name = this.match?.teams?.[msg.team]?.name || 'A CREW';
+      const mine = msg.team === this.myTeam;
+      this.hud.roundBanner(mine ? 'TERMINAL TAKEN' : name + ' TOOK THE TERMINAL', '', 2200);
+      this.audio.click(mine ? 'ui' : 'error');
+    });
+    net.on('cash.banked', (msg) => {
+      this.cash = msg.cash;
+      const name = this.match?.teams?.[msg.team]?.name || 'A CREW';
+      const mine = msg.team === this.myTeam;
+      const amount = '$' + (msg.total || 0).toLocaleString();
+      this.hud.roundBanner(mine ? 'CASHED OUT' : name + ' CASHED OUT', amount, 3200);
+    });
+    net.on('respawned', () => this.hud.hideDeath());
     net.on('drone.start', (msg) => {
       this.pilotId = msg.id;
       this._droneYaw = Number.isFinite(msg.yaw) ? msg.yaw : (this.local?.yaw ?? 0);
@@ -245,6 +279,11 @@ export class Game {
   // ---------------------------------------------------------------- match
   async startMatch(msg) {
     this.audio.stopMenuMusic();
+    this.cash = null;
+    this.cashBox = null;
+    this.cashActive = null;
+    this.cashGoal = msg.cashGoal || 0;
+    this.cashView.setObjectives(msg.objectives || null);
     const mode = getMode(msg.mode);
     // Leaving the training ground has to take its targets and racks with it,
     // or they turn up scattered across the estate.
@@ -256,6 +295,8 @@ export class Game {
       modeName: mode.name,
       mapName: MAP_INFO[msg.map]?.name || msg.map,
       teams: !!msg.teams,
+      teamInfo: Array.isArray(msg.teams) ? msg.teams : null,
+      cashoutTime: mode.cashoutTime || 75,
       scoreLimit: msg.scoreLimit,
       timeLimit: msg.timeLimit,
       players: msg.players,
@@ -398,6 +439,12 @@ export class Game {
 
     this.droneRows = msg.dr || [];
     this.myDroneId = msg.mine || null;
+    if (msg.co) {
+      this.cash = msg.co.cash;
+      this.cashBox = msg.co.box;
+      this.cashActive = msg.co.act;
+      this.cashView.sync(msg.co, this.match?.teams);
+    }
     this.marks = msg.mk || [];
     // The server is the authority on whether we are still driving: losing
     // the drone, dying, or the round ending all end it the same way.
@@ -565,6 +612,10 @@ export class Game {
   }
 
   leaveMatch() {
+    this.cashView.clear();
+    this.cash = null;
+    this.cashBox = null;
+    this.cashActive = null;
     this.inMatch = false;
     this.phase = PHASE.NONE;
     this.match = null;
@@ -647,6 +698,27 @@ export class Game {
     // Given up on purpose: leave it given up until the player says otherwise.
     if (this.cursorFree || !this.inMatch || this.paused || this.phase === PHASE.OUTRO) return;
     this.armRelock();
+  }
+
+  /**
+   * What F would do from where the player is standing, or null. Driven off
+   * the same ranges the room uses, so the prompt never offers something the
+   * server will refuse.
+   */
+  cashPrompt() {
+    if (!this.cash || !this.local?.alive || this.pilotId) return null;
+    const box = this.cashBox;
+    const me = this.local.state.pos;
+    const near = (p, r) => {
+      const dx = p[0] - me.x, dy = p[1] - me.y, dz = p[2] - me.z;
+      return Math.hypot(dx, dy, dz) < r;
+    };
+    if (box?.carrier === this.net.id) {
+      const t = this.cashView.terminalNear(me, 3.2);
+      return t ? 'DEPOSIT THE CASHBOX' : 'CARRYING THE CASHBOX';
+    }
+    if (box && !box.carrier && !box.terminal && near(box.p, 1.9)) return 'TAKE THE CASHBOX';
+    return null;
   }
 
   /** Free the mouse, or take it back as the crosshair. */
@@ -739,6 +811,11 @@ export class Game {
       else if (this.equipGrenade(this.grenadeKind)) this.throwGrenade();
     }
     if (this.grenadeEquipped && input.takeMouseClick()) this.throwGrenade();
+
+    // F is the objective key in Cashout: pick the box up, or feed it in.
+    if (input.wasPressed('use') && this.cash && !this.training) {
+      this.net.send({ t: 'interact' });
+    }
 
     if (input.wasPressed('use') && this.training) {
       if (this.training.takeNearbyWeapon(this.local)) this.audio.click();
@@ -1090,6 +1167,13 @@ export class Game {
       grenadeStock: this.grenadeStock,
       droneUsed: this.droneUsed,
       droneParked: !!this.myDroneId && !this.pilotId,
+      cash: this.cash,
+      cashActive: this.cashActive,
+      cashoutTime: this.match?.cashoutTime || 75,
+      cashGoal: this.cashGoal,
+      cashPrompt: this.cashPrompt(),
+      myTeam: this.myTeam,
+      teamInfo: this.match?.teamInfo || null,
       dronePiloting: !!this.pilotId,
       droneScanCooldown: this.droneScanReady,
       droneScanMax: DRONE.scanCooldown,
