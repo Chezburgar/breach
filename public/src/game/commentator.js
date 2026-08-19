@@ -1,30 +1,44 @@
 // The commentary booth.
 //
-// Real recordings, played from /assets/vo. Two personas were supplied — an
-// analyst and an Aussie colour commentator — and the booth alternates between
-// them so consecutive lines sound like two people rather than one on a loop.
+// Plays recorded lines from /assets/vo against match events. Two rules run
+// the whole thing:
 //
-// Lines are chosen by *slot*, not by name: the intro wants a monologue that
-// can run under the fly-through, the beats inside a round want something
-// short. Nothing here reads a player's name, because no recording can say a
-// name it has never heard and stitching one in from a synthesiser sounded
-// worse than not saying it at all.
+//   Nothing overlaps. One line at a time, always — two commentators talking
+//   over each other is noise, not atmosphere.
 //
-// Everything is data. Reslot a clip in manifest.json and it moves; add clips
-// and they join the pool. There is no list of ids in this file.
+//   Late is worse than silent. A booth is only convincing if it reacts to
+//   what just happened, so a line that has waited too long is dropped rather
+//   than played against the wrong moment. Eliminations are frequent and
+//   cheap; a round result is worth waiting for.
+//
+// Which clip belongs to which moment is entirely in manifest.json. Nothing
+// here names a file.
 
 const VO_DIR = new URL('../../assets/vo/', import.meta.url);
+
+// How long a queued line stays worth playing, and how hard it pushes.
+// A win announcement outranks everything and never expires; an elimination
+// call is stale almost immediately.
+const SLOTS = {
+  win:   { priority: 100, staleAfter: Infinity },
+  round: { priority: 80,  staleAfter: 6 },
+  intro: { priority: 70,  staleAfter: Infinity },
+  last:  { priority: 50,  staleAfter: 3 },
+  elim:  { priority: 10,  staleAfter: 1.6 },
+};
+
+const GAP = 0.18;   // seconds of air between lines
 
 export class Commentator {
   constructor(settings, audio) {
     this.settings = settings || {};
     this.audio = audio || null;
     this.enabled = true;
-    this.bySlot = new Map();     // slot -> clips
-    this.lastId = new Map();     // slot -> last clip played
-    this.lastPersona = null;
-    this.token = 0;
-    this.playing = null;
+    this.clips = [];
+    this.queue = [];
+    this.current = null;
+    this.freeAt = 0;
+    this.lastPick = new Map();
     this.ready = this.load();
   }
 
@@ -33,101 +47,151 @@ export class Commentator {
       const res = await fetch(new URL('manifest.json', VO_DIR), { cache: 'no-cache' });
       if (!res.ok) return;
       const data = await res.json();
-      for (const c of (Array.isArray(data) ? data : data.clips) || []) {
-        if (!c?.file) continue;
-        const slot = c.slot || 'sting';
-        if (!this.bySlot.has(slot)) this.bySlot.set(slot, []);
-        this.bySlot.get(slot).push({ ...c, url: new URL(c.file, VO_DIR).href });
-      }
+      this.clips = ((Array.isArray(data) ? data : data.clips) || [])
+        .filter((c) => c?.file)
+        .map((c) => ({ ...c, url: new URL(c.file, VO_DIR).href }));
     } catch {
-      // No manifest: the booth is simply silent.
+      // No manifest: the booth stays quiet.
     }
   }
 
   setEnabled(on) {
     this.enabled = !!on;
-    if (!on) this.stop();
+    if (!on) this.reset();
   }
 
-  stop() {
-    this.token++;
-    if (this.playing) {
-      try { this.playing.stop(); } catch { /* already ended */ }
-      this.playing = null;
+  /** Stop everything and forget what was waiting. */
+  reset() {
+    this.queue.length = 0;
+    if (this.current) {
+      try { this.current.stop(); } catch { /* already ended */ }
+      this.current = null;
     }
+    this.freeAt = 0;
   }
+
+  get now() { return performance.now() / 1000; }
 
   get volume() {
     return Math.max(0, Math.min(1, this.settings.masterVolume ?? 0.8));
   }
 
-  /**
-   * Pick a line for a slot.
-   *
-   * Two rules, both about not sounding like a machine: never the same clip
-   * twice running, and prefer the persona who did *not* speak last, so the
-   * booth feels like a pair trading lines.
-   */
-  pick(slot, maxSeconds) {
-    let pool = this.bySlot.get(slot) || [];
-    if (maxSeconds) pool = pool.filter((c) => !c.seconds || c.seconds <= maxSeconds);
-    if (!pool.length) return null;
-
-    const last = this.lastId.get(slot);
-    let choices = pool.filter((c) => c.id !== last);
-    if (!choices.length) choices = pool;
-
-    const fresh = choices.filter((c) => c.persona && c.persona !== this.lastPersona);
-    if (fresh.length) choices = fresh;
-
-    const pickOne = choices[Math.floor(Math.random() * choices.length)];
-    this.lastId.set(slot, pickOne.id);
-    this.lastPersona = pickOne.persona || null;
-    return pickOne;
+  /** Clips for a slot, optionally for one team. */
+  pool(slot, team) {
+    return this.clips.filter((c) => c.slot === slot
+      && (team == null || c.team == null || c.team === team));
   }
 
   /**
-   * Play one line from a slot. Interrupts whatever is talking, because two
-   * commentators over each other is noise, not atmosphere.
-   * @returns the clip played, or null
+   * Ask for a line. It joins the queue rather than interrupting; whether it
+   * is ever heard depends on how long the booth stays busy.
+   *
+   * @param opts.team    restrict to one side's clips
+   * @param opts.maxSeconds only consider lines that fit
+   * @param opts.ordered play the pool in `order`, not at random
    */
-  async play(slot, { maxSeconds, delay = 0 } = {}) {
-    if (!this.enabled || !this.audio?.ready) return null;
+  async say(slot, opts = {}) {
+    if (!this.enabled) return;
     await this.ready;
-    const clip = this.pick(slot, maxSeconds);
-    if (!clip) return null;
+    const cfg = SLOTS[slot];
+    if (!cfg) return;
 
-    this.stop();
-    const token = this.token;
-    if (delay > 0) await new Promise((r) => setTimeout(r, delay * 1000));
-    if (token !== this.token) return null;
+    let pool = this.pool(slot, opts.team);
+    if (opts.maxSeconds) pool = pool.filter((c) => !c.seconds || c.seconds <= opts.maxSeconds);
+    if (!pool.length) return;
+
+    if (opts.ordered) {
+      // A sequence: queue the lot, in order, as one block.
+      const seq = pool.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+      for (const clip of seq) this.enqueue(clip, cfg, slot);
+    } else {
+      this.enqueue(this.choose(pool, slot), cfg, slot);
+    }
+    this.pump();
+  }
+
+  /** Never the same line twice running, when there is an alternative. */
+  choose(pool, slot) {
+    const last = this.lastPick.get(slot);
+    const fresh = pool.filter((c) => c.id !== last);
+    const from = fresh.length ? fresh : pool;
+    const clip = from[Math.floor(Math.random() * from.length)];
+    this.lastPick.set(slot, clip.id);
+    return clip;
+  }
+
+  enqueue(clip, cfg, slot) {
+    this.queue.push({ clip, slot, priority: cfg.priority, staleAfter: cfg.staleAfter, at: this.now });
+    // Highest priority first; within a priority, the order they arrived —
+    // which is what keeps a numbered sequence in sequence.
+    this.queue.sort((a, b) => b.priority - a.priority || a.at - b.at);
+  }
+
+  /** Start the next line if nothing is talking. */
+  async pump() {
+    if (!this.enabled || this.current || !this.audio?.ready) return;
+    if (this.now < this.freeAt) {
+      setTimeout(() => this.pump(), (this.freeAt - this.now) * 1000);
+      return;
+    }
+
+    // Drop anything that has been waiting past its moment.
+    const now = this.now;
+    while (this.queue.length && now - this.queue[0].at > this.queue[0].staleAfter) {
+      this.queue.shift();
+    }
+    const next = this.queue.shift();
+    if (!next) return;
 
     try {
-      const buf = await this.audio.loadBuffer(clip.url);
-      if (token !== this.token) return null;
+      const buf = await this.audio.loadBuffer(next.clip.url);
+      if (!this.enabled) return;
       const src = this.audio.ctx.createBufferSource();
       src.buffer = buf;
       const gain = this.audio.ctx.createGain();
-      // Sits above the music: the booth is the thing you are meant to hear.
       gain.gain.value = this.volume;
       src.connect(gain); gain.connect(this.audio.music);
-      src.onended = () => { if (this.playing === src) this.playing = null; };
+      src.onended = () => {
+        if (this.current === src) this.current = null;
+        this.freeAt = this.now + GAP;
+        this.pump();
+      };
       src.start();
-      this.playing = src;
-      return clip;
+      this.current = src;
+      this.lastPlayed = next.clip.id;
     } catch {
-      return null;
+      this.current = null;
+      this.pump();
     }
   }
 
-  /** Opens the match, under the fly-through. */
-  callIntro(seconds) {
-    return this.play('intro', { maxSeconds: seconds, delay: 0.6 });
+  // ------------------------------------------------------------- moments
+  /** The three opening lines, in order, under the fly-through. */
+  callIntro() {
+    this.reset();
+    return this.say('intro', { ordered: true });
   }
 
-  /** A round begins or ends. */
-  callRound() { return this.play('round', { delay: 0.35 }); }
+  /**
+   * Somebody died. The side that did it gets the call — unless the kill left
+   * a team on their last player, which is the more interesting fact.
+   */
+  callKill(killerTeam, alive) {
+    if (killerTeam == null || killerTeam < 0) return;
+    const cornered = (alive || []).findIndex((n) => n === 1);
+    if (cornered >= 0) return this.say('last', { team: cornered });
+    return this.say('elim', { team: killerTeam });
+  }
 
-  /** A short punctuation mark — a streak, a clutch, the final blow. */
-  callSting() { return this.play('sting', { delay: 0.2 }); }
+  callRoundWon(team) {
+    if (team == null || team < 0) return;
+    return this.say('round', { team });
+  }
+
+  callMatchWon(team) {
+    if (team == null || team < 0) return;
+    return this.say('win', { team });
+  }
+
+  stop() { this.reset(); }
 }

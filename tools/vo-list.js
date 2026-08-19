@@ -24,17 +24,19 @@ for (const c of clips) {
 }
 
 console.log(`BREACH — commentary booth (${clips.length} clips)\n`);
-for (const slot of ['intro', 'round', 'sting']) {
-  const list = (bySlot.get(slot) || []).sort((a, b) => a.seconds - b.seconds);
+for (const slot of ['intro', 'elim', 'last', 'round', 'win']) {
+  // Intro clips are a sequence, so list them the way they play.
+  const list = (bySlot.get(slot) || []).sort((a, b) =>
+    (a.order || 0) - (b.order || 0) || (a.team ?? 9) - (b.team ?? 9) || a.seconds - b.seconds);
   if (!list.length) continue;
   console.log(`${slot.toUpperCase()}  (${list.length})`);
   for (const c of list) {
-    console.log(`  ${String(c.seconds).padStart(5)}s  ${c.persona.padEnd(8)} ${c.id}`
+    console.log(`  ${String(c.seconds).padStart(5)}s  ${('team '+(c.team ?? '-')).padEnd(7)} ${c.id}`
       + (c.text ? `  "${c.text}"` : '  (unlabelled)'));
   }
   console.log();
 }
-const unknown = [...bySlot.keys()].filter((s) => !['intro', 'round', 'sting'].includes(s));
+const unknown = [...bySlot.keys()].filter((s) => !['intro','elim','last','round','win'].includes(s));
 if (unknown.length) console.log(`Slots the game never plays: ${unknown.join(', ')}`);
 const unlabelled = clips.filter((c) => !c.text).length;
 if (unlabelled) console.log(`${unlabelled} clips have no text — fill them in to know what you are placing.`);
