@@ -340,18 +340,23 @@ h3 { font-size: 12px; color: var(--muted); }
 .respawn { margin-top: 20px; font-size: 12px; letter-spacing: 0.3em; color: var(--muted); }
 
 /* --------------------------------------------------------------- intro */
-.intro { z-index: 16; overflow: hidden; background: #05070b; }
+/* The intro is a window onto the fly-through, not a page over it. An opaque
+   background here hid the camera work completely. */
+.intro { z-index: 16; overflow: hidden; background: transparent; pointer-events: none; }
 .intro-bg {
   position: absolute; inset: 0;
+  /* Scrims top and bottom only, so the middle of the frame stays clear and the
+     map is actually visible behind the rosters. */
   background:
-    radial-gradient(900px 600px at 20% 20%, rgba(255, 106, 61, 0.14), transparent 60%),
-    radial-gradient(900px 600px at 80% 80%, rgba(57, 183, 255, 0.14), transparent 60%);
+    linear-gradient(180deg, rgba(5, 7, 11, 0.88) 0%, rgba(5, 7, 11, 0.25) 26%,
+      rgba(5, 7, 11, 0.12) 55%, rgba(5, 7, 11, 0.86) 100%),
+    radial-gradient(1400px 900px at 50% 50%, transparent 40%, rgba(5, 7, 11, 0.55) 100%);
 }
 .intro-head { position: relative; text-align: center; padding-top: 6vh; }
 .intro-mode { font-size: 13px; letter-spacing: 0.5em; color: var(--muted); }
 .intro-map {
   font-size: 54px; font-weight: 700; letter-spacing: 0.16em;
-  margin-top: 6px;
+  margin-top: 6px; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9);
 }
 .intro-rosters {
   position: relative;
@@ -363,7 +368,10 @@ h3 { font-size: 12px; color: var(--muted); }
 .intro-team.right { align-items: flex-end; }
 .intro-card {
   display: flex; align-items: center; gap: 12px;
-  background: var(--panel); border: 1px solid var(--line);
+  /* Sitting over moving footage, so the backing is heavier than a menu panel. */
+  background: rgba(8, 11, 16, 0.82);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
   padding: 8px 12px;
   opacity: 0; transform: translateX(-24px);
   animation: cardin 0.5s cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
