@@ -4,10 +4,11 @@ import {
   FIXED_DT, INTERP_DELAY, MATCH, MAX_ROLLBACK, PLAYER, SNAPSHOT_DT,
   BTN, HIT_MULTIPLIER, TEAM_INFO,
 } from '../constants.js';
-import { buildWorld, raycastWorld, rayPlayer, raySphere, hasLineOfSight } from '../collision.js';
+import { buildWorld, raycastWorld, rayPlayer, raySphere, hasLineOfSight, groundUnder } from '../collision.js';
 import { createPlayerState, stepPlayer, eyePosition } from '../controller.js';
 import { getMap } from '../maps/index.js';
 import { zoneAt } from '../maps/builder.js';
+import { getAbility, sanitizeAbility, ABILITIES } from '../abilities.js';
 import { getMode } from '../modes.js';
 import {
   resolveWeapon, currentSpread, damageAt, getWeapon, sanitizeLoadout,
@@ -23,6 +24,30 @@ import { Bot, BOT_NAMES } from './bots.js';
 // Monotonic seconds. performance.now() exists in both Node and the browser,
 // which is what lets this simulation run on either side.
 const now = () => performance.now() / 1000;
+
+/**
+ * Where a ray crosses a shield's plane, or null. The barrier is a flat panel
+ * standing on the ground, so this is a plane test clipped to its extents
+ * rather than a box: a box would let a round graze the edge and still stop.
+ */
+function rayShield(origin, dir, o, maxT) {
+  const sin = Math.sin(o.yaw), cos = Math.cos(o.yaw);
+  // Panel normal, in the direction it faces.
+  const nx = -sin, nz = -cos;
+  const denom = dir.x * nx + dir.z * nz;
+  if (Math.abs(denom) < 1e-6) return null;
+  const t = ((o.pos.x - origin.x) * nx + (o.pos.z - origin.z) * nz) / denom;
+  if (t < 0 || t > maxT) return null;
+
+  const hx = origin.x + dir.x * t - o.pos.x;
+  const hy = origin.y + dir.y * t - o.pos.y;
+  const hz = origin.z + dir.z * t - o.pos.z;
+  // Distance along the panel's width axis.
+  const along = hx * cos - hz * sin;
+  if (Math.abs(along) > o.width / 2) return null;
+  if (hy < 0 || hy > o.height) return null;
+  return t;
+}
 
 const HISTORY_TICKS = 48;      // ~0.8s of rewind material
 const MELEE_RANGE = 2.4;
@@ -61,6 +86,8 @@ export class GameRoom {
     this.roundLog = [];
 
     this.projectiles = [];
+    this.placeables = [];      // shields and mines standing in the world
+    this.placeableSeq = 0;
     this.smokes = [];
     this.projectileSeq = 0;
     this.droneSeq = 0;
@@ -242,6 +269,7 @@ export class GameRoom {
       droneUsed: false,     // one per operator per round
       piloting: false,      // driving it, body left standing
       markedUntil: 0,       // painted by an enemy scan until this time
+      ability: sanitizeAbility(lo.ability),
       markedBy: -1,         // which team can see the mark
       zone: '',
       joinedAt: this.time,
@@ -378,6 +406,7 @@ export class GameRoom {
     }
 
     this.stepDrones(dt, live);
+    if (live) this.stepPlaceables(dt);
     if (live) this.stepProjectiles(dt);
     if (this.smokes.length) {
       this.smokes = this.smokes.filter((s) => this.time < s.until);
@@ -603,12 +632,28 @@ export class GameRoom {
     return { x: dx / l, y: dy / l, z: dz / l };
   }
 
+  /**
+   * Where a shot stops. Walls, then shields, then people — a barrier has to
+   * be checked before hitboxes or you would shoot your own cover's protector
+   * through it.
+   */
   traceShot(shooter, origin, dir, rw, frame) {
     const MAX = 260;
     const wallHit = raycastWorld(this.world, origin, dir, MAX, { sightOnly: true });
     const wallT = wallHit ? wallHit.t : MAX;
 
-    let bestT = wallT;
+    // A bulwark eats rounds from the far side and lets its owners' through,
+    // which is the whole reason to plant one.
+    let shield = null;
+    let shieldT = wallT;
+    for (const o of this.placeables) {
+      if (o.kind !== 'shield' || o.dead) continue;
+      if (o.team === shooter.team) continue;
+      const t = rayShield(origin, dir, o, shieldT);
+      if (t != null && t < shieldT) { shieldT = t; shield = o; }
+    }
+
+    let bestT = shield ? shieldT : wallT;
     let victim = null;
     let zone = null;
 
@@ -636,6 +681,15 @@ export class GameRoom {
       y: origin.y + dir.y * bestT,
       z: origin.z + dir.z * bestT,
     };
+
+    if (!victim && shield) {
+      this.hitPlaceable(shield, rw.damage ?? 30);
+      const at = {
+        x: origin.x + dir.x * shieldT, y: origin.y + dir.y * shieldT, z: origin.z + dir.z * shieldT,
+      };
+      this.pendingEvents.push({ e: 'impact', p: r3(at), n: [0, 0, 1], m: 'glass', g: true });
+      return { end: at, victim: null, damage: 0, zone: null, dist: shieldT };
+    }
 
     if (!victim) {
       if (wallHit) {
@@ -1160,7 +1214,7 @@ export class GameRoom {
       const anchors = this.spawnCluster(team, squad.length);
       squad.forEach((p, i) => {
         const sp = anchors[i % anchors.length];
-        p.state = createPlayerState(sp);
+        p.state = createPlayerState(sp, sanitizeAbility(p.loadout?.ability));
         p.introSpawn = sp;
       });
     }
@@ -1187,7 +1241,11 @@ export class GameRoom {
   /** Put a player into the world at a specific spawn and give them a full kit. */
   respawnAt(p, spawn) {
     if (p.pendingLoadout) { p.loadout = p.pendingLoadout; p.pendingLoadout = null; }
-    p.state = createPlayerState(spawn);
+    // The controller reads the ability off the state, so it is handed in with
+    // the spawn — a state built without it silently disables the ability, and
+    // there is more than one place that builds one.
+    p.state = createPlayerState(spawn, sanitizeAbility(p.loadout?.ability));
+    p.ability = p.state.ability;
     p.alive = true;
     p.spectating = false;
     p.spectateTarget = null;
@@ -1443,6 +1501,8 @@ export class GameRoom {
         ev: events,
         gr: grenadeState,
         dr: drones,
+        pl: this.placeables.length ? this.placeableSnapshot() : null,
+        ab: { id: p.state.ability, ready: round2(Math.max(0, p.state.abilityReadyAt - p.state.time)) },
         mk: this.marksFor(p.team),
         pilot: p.piloting ? (p.drone?.id || null) : null,
         mine: p.drone?.id || null,
@@ -1456,6 +1516,162 @@ export class GameRoom {
   }
 
   // -------------------------------------------------------------- inbound
+  // ---------------------------------------------------------- abilities
+  /**
+   * A world ability: something that goes into the match rather than into your
+   * own velocity. Movement abilities never come through here — those run in
+   * the shared controller so the client can predict them.
+   */
+  useAbility(p) {
+    if (!p.alive || this.phase !== 'live') return;
+    const def = getAbility(p.state.ability);
+    if (def.kind !== 'world') return;
+    // The controller counts the cooldown on the player state, and that is
+    // the clock the client predicts against. Using room time here would put
+    // the two on different origins and the HUD would show nonsense.
+    if (p.state.time < p.state.abilityReadyAt) return;
+
+    const eye = eyePosition(p.state);
+    const dir = dirFromAngles(p.cmd.yaw, p.cmd.pitch);
+    p.state.abilityReadyAt = p.state.time + def.cooldown;
+
+    if (def.id === 'shield') this.plantShield(p, def, eye, dir);
+    else if (def.id === 'mine') this.plantMine(p, def, eye, dir);
+    else if (def.id === 'scanner') this.pulseScan(p, def);
+
+    this.send(p.client, { t: 'ability.used', id: def.id, cooldown: def.cooldown });
+  }
+
+  /** A barrier planted on the floor ahead, facing the way you are looking. */
+  plantShield(p, def, eye, dir) {
+    const flat = Math.hypot(dir.x, dir.z) || 1;
+    const at = {
+      x: p.state.pos.x + (dir.x / flat) * def.range,
+      y: p.state.pos.y,
+      z: p.state.pos.z + (dir.z / flat) * def.range,
+    };
+    const ground = groundUnder(this.world, at.x, at.z, 0.4, at.y + 1.2, at.y - 2.5);
+    if (ground > -Infinity) at.y = ground;
+
+    this.placeables.push({
+      id: `sh${++this.placeableSeq}`,
+      kind: 'shield', owner: p.id, team: p.team,
+      pos: at, yaw: Math.atan2(-dir.x, -dir.z),
+      health: def.health, until: this.time + def.life,
+      width: def.width, height: def.height,
+    });
+    this.broadcastPlaceables();
+  }
+
+  /** A proximity charge, dropped at your feet. */
+  plantMine(p, def, eye, dir) {
+    const flat = Math.hypot(dir.x, dir.z) || 1;
+    const at = {
+      x: p.state.pos.x + (dir.x / flat) * 1.1,
+      y: p.state.pos.y + 0.06,
+      z: p.state.pos.z + (dir.z / flat) * 1.1,
+    };
+    const ground = groundUnder(this.world, at.x, at.z, 0.25, at.y + 1.0, at.y - 2.0);
+    if (ground > -Infinity) at.y = ground + 0.06;
+
+    this.placeables.push({
+      id: `mn${++this.placeableSeq}`,
+      kind: 'mine', owner: p.id, team: p.team,
+      pos: at, yaw: 0,
+      health: def.health, until: this.time + def.life,
+      armAt: this.time + def.arm,
+    });
+    this.broadcastPlaceables();
+  }
+
+  /** A ping that paints every enemy inside it for your side. */
+  pulseScan(p, def) {
+    const from = { ...p.state.pos };
+    let hits = 0;
+    for (const q of this.players.values()) {
+      if (!q.alive || q.team === p.team) continue;
+      if (vdist(q.state.pos, from) > def.radius) continue;
+      q.markedUntil = this.time + def.markFor;
+      q.markedBy = p.team;
+      hits++;
+    }
+    this.broadcast({
+      t: 'ability.pulse', by: p.id, team: p.team, hits,
+      p: [round2(from.x), round2(from.y), round2(from.z)], radius: def.radius,
+    });
+  }
+
+  /** Everything planted on the map, for the snapshot. */
+  placeableSnapshot() {
+    return this.placeables.map((o) => ({
+      id: o.id, k: o.kind, team: o.team, owner: o.owner,
+      p: [round2(o.pos.x), round2(o.pos.y), round2(o.pos.z)],
+      y: round3(o.yaw),
+      armed: o.armAt ? this.time >= o.armAt : true,
+    }));
+  }
+
+  broadcastPlaceables() {
+    this.broadcast({ t: 'placeables', list: this.placeableSnapshot() });
+  }
+
+  /** Time out, trigger and clean up everything planted. */
+  stepPlaceables(dt) {
+    if (!this.placeables.length) return;
+    let changed = false;
+
+    for (const o of this.placeables) {
+      if (o.dead) continue;
+      if (this.time >= o.until) { o.dead = true; changed = true; continue; }
+      if (o.kind !== 'mine' || this.time < o.armAt) continue;
+
+      const def = ABILITIES.mine;
+      for (const q of this.players.values()) {
+        if (!q.alive || q.team === o.team) continue;
+        if (vdist(q.state.pos, o.pos) > def.trigger) continue;
+        this.detonateMine(o, def);
+        changed = true;
+        break;
+      }
+    }
+
+    if (this.placeables.some((o) => o.dead)) {
+      this.placeables = this.placeables.filter((o) => !o.dead);
+    }
+    if (changed) this.broadcastPlaceables();
+    void dt;
+  }
+
+  detonateMine(o, def) {
+    o.dead = true;
+    const owner = this.players.get(o.owner);
+    this.pendingEvents.push({ e: 'mine', p: [round2(o.pos.x), round2(o.pos.y), round2(o.pos.z)] });
+    for (const q of this.players.values()) {
+      if (!q.alive) continue;
+      const d = vdist(q.state.pos, o.pos);
+      if (d > def.falloff) continue;
+      // Friendly fire is off, but the owner is not immune to their own snare.
+      if (q.team === o.team && q.id !== o.owner) continue;
+      if (!hasLineOfSight(this.world, { ...o.pos, y: o.pos.y + 0.3 },
+        { ...q.state.pos, y: q.state.pos.y + 0.9 })) continue;
+      const falloff = 1 - Math.min(1, d / def.falloff);
+      this.applyDamage(q, owner || null, def.damage * falloff, 'mine', 'chest', d);
+    }
+  }
+
+  /** A round hit something planted. Returns true if it was absorbed. */
+  hitPlaceable(o, damage) {
+    o.health -= damage;
+    if (o.health <= 0) {
+      o.dead = true;
+      this.pendingEvents.push({
+        e: 'break', k: o.kind, p: [round2(o.pos.x), round2(o.pos.y), round2(o.pos.z)],
+      });
+      this.broadcastPlaceables();
+    }
+    return true;
+  }
+
   onMessage(client, msg) {
     const p = this.players.get(client.id);
     if (!p) return;
@@ -1482,6 +1698,7 @@ export class GameRoom {
       case 'drone.enter': this.enterDrone(p); break;
       case 'drone.exit': this.exitDrone(p); break;
       case 'drone.scan': this.droneScan(p); break;
+      case 'ability': this.useAbility(p); break;
       case 'drone.input': {
         const d = p.drone;
         if (!d || !d.alive || !p.piloting) break;

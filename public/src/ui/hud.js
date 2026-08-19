@@ -115,6 +115,7 @@ export class HUD {
 
     this.renderFlash(s.blind);
     this.renderGrenades(s);
+    this.renderAbility(s);
     this.renderDrone(s);
     this.renderDroneFeed(s);
     this.renderSpectate(s);
@@ -156,6 +157,29 @@ export class HUD {
     }
   }
 
+
+  /** The equipped ability, its key, and how long until it is back. */
+  renderAbility(s) {
+    const el = $('ability-chip');
+    if (!s.ability) { el.classList.add('hidden'); return; }
+    el.classList.toggle('hidden', !s.alive);
+
+    const cd = Math.max(0, s.abilityReady || 0);
+    const def = s.abilityDef;
+    const key = `${s.ability}|${cd > 0 ? Math.ceil(cd) : 0}`;
+    if (el.dataset.key !== key) {
+      el.dataset.key = key;
+      el.className = `ability-chip ${cd > 0 ? '' : 'ready'}`;
+      el.innerHTML = `<span>${def?.short || 'ABILITY'}</span>`
+        + (cd > 0 ? `<span class="cd">${Math.ceil(cd)}s</span>` : '')
+        + '<b>C</b><i></i>';
+    }
+    const bar = el.querySelector('i');
+    if (bar) {
+      const max = def?.cooldown || 1;
+      bar.style.width = `${(1 - Math.min(1, cd / max)) * 100}%`;
+    }
+  }
 
   /**
    * The drone chip. One asset, one key, three states — a player should not

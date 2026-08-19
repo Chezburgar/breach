@@ -14,6 +14,7 @@ export const DEFAULT_BINDS = {
   // P, not Escape. Escape is the browser's own key for releasing the
   // pointer and cannot be intercepted, so binding the pause menu to it made
   // the two fight: one press, two unrelated things.
+  ability: 'KeyC',
   scoreboard: 'Tab', chat: 'Enter', menu: 'KeyP', cursor: 'KeyL',
 };
 
@@ -159,6 +160,9 @@ export class Input {
     if (this.isDown('jump')) b |= BTN.JUMP;
     if (this.isDown('crouch')) b |= BTN.CROUCH;
     if (this.isDown('sprint')) b |= BTN.SPRINT;
+    // Held, not tapped: the controller only acts on the first tick it sees
+    // the bit and its own cooldown gates the rest, so holding C is harmless.
+    if (this.isDown('ability')) b |= BTN.ABILITY;
     if (this.isDown('leanLeft')) b |= BTN.LEAN_L;
     if (this.isDown('leanRight')) b |= BTN.LEAN_R;
     if (this.mouse.right && !opts.noAds) b |= BTN.ADS;

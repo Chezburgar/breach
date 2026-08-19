@@ -7,6 +7,7 @@ import {
 } from '/shared/weapons.js';
 import { DEFAULT_BANNER, DEFAULT_FANFARE, levelFromXp, xpForLevel, randomName, sanitizeName } from '/shared/cosmetics.js';
 import { QUALITY_PRESETS } from '../engine/renderer.js';
+import { ABILITIES, sanitizeAbility } from '/shared/abilities.js';
 import { allBanners, drawBanner, bannerFromFile, registerBanner } from './banners.js';
 
 const $ = (id) => document.getElementById(id);
@@ -218,6 +219,36 @@ export class Menu {
       toggle.appendChild(b);
     }
     list.appendChild(toggle);
+
+    // One ability per operator, and it belongs to the loadout rather than to
+    // either gun — so it sits above the slot toggle, not inside a weapon.
+    const ability = document.createElement('div');
+    ability.className = 'ability-pick';
+    ability.innerHTML = '<h3>ABILITY</h3><div class="chips" id="ability-chips"></div>' +
+      '<p class="muted" id="ability-blurb"></p>';
+    list.appendChild(ability);
+
+    const drawAbilities = () => {
+      const host = $('ability-chips');
+      const current = sanitizeAbility(this.profile.loadout.ability);
+      host.innerHTML = '';
+      for (const def of Object.values(ABILITIES)) {
+        const c = document.createElement('div');
+        c.className = `chip ${def.id === current ? 'active' : ''}`;
+        c.textContent = def.name;
+        c.addEventListener('click', () => {
+          this.click();
+          this.profile.loadout.ability = def.id;
+          this.profile.loadout = sanitizeLoadout(this.profile.loadout);
+          this.commitLoadout();
+          drawAbilities();
+        });
+        host.appendChild(c);
+      }
+      const def = ABILITIES[current];
+      $('ability-blurb').textContent = `${def.blurb}  ·  ${def.cooldown}s cooldown  ·  C`;
+    };
+    drawAbilities();
 
     const pool = this.editingSlot === 'primary' ? PRIMARIES : SECONDARIES;
     const groups = new Map();
