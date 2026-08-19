@@ -1,45 +1,51 @@
-# Announcer voice-over
+# Commentary booth
 
-The pre-game announcer reads the rosters over the fly-through. It has two
-voices and prefers the good one:
+Fifteen ElevenLabs lines from two personas — an analyst and an Aussie colour
+commentator. The booth alternates between them so consecutive lines sound like
+two people rather than one on a loop, and never plays the same clip twice
+running.
 
-1. **Recorded clips from this folder.** However you make them — a microphone,
-   ElevenLabs, Azure, `say -o` on a Mac.
-2. **The browser's speech synthesiser**, for anything with no clip. It sounds
-   synthetic, but it can pronounce a name it has never seen, which no
-   recording can.
+    node tools/vo-list.js
 
-## What to record
+lists every clip, its length, and the slot it is in.
 
-    node tools/vo-script.js
+## Slots
 
-prints every line and the filename it needs. `--json` gives you the same list
-in a shape you can feed straight to a TTS API.
+Slots decide *when* a line can play:
 
-## How lines are built
+| slot    | when                                          |
+|---------|-----------------------------------------------|
+| `intro` | under the pre-game fly-through                |
+| `round` | a round starting or ending, and the match end  |
+| `sting` | short punctuation — a three-kill streak        |
 
-A roster line is stitched from fragments — the frame, a clip per name, and
-"and" before the last one:
+An `intro` clip is only chosen if it fits inside the fly-through, so a line
+longer than the intro is skipped rather than cut off.
 
-    frame_on_vanguard  +  name_kestrel  +  name_vulcan  +  frame_and  +  name_rooke
+## These clips were slotted by length, not by content
 
-Recording every possible line-up is impossible, so the pieces are recorded once
-and recombined. Record them with **list intonation**: the frame and the middle
-names rising, as though more is coming, and let the sentence fall only on the
-last name.
+Length is the only thing about an audio file that can be read without
+listening to it — so the initial slotting is a guess: over six seconds went to
+`intro`, three to six to `round`, under three to `sting`.
 
-A line only uses recordings if *every* fragment of it exists. Miss one and the
-whole sentence goes to the synthesiser instead — half a line in a real voice
-and half in a robot is worse than either on its own.
+**Listen to them and fix the ones that landed wrong.** Edit `slot` in
+`manifest.json`; nothing in the game code names a clip, so that file is the
+only place the booth is configured. Fill in `text` while you are there — it is
+never read by the game, but a line you cannot identify is a line you cannot
+place.
 
-## Registering them
+## Adding more
 
-    {
-      "clips": [
-        { "id": "map_blackmoor_estate", "file": "map_blackmoor_estate.mp3" },
-        { "id": "frame_on_vanguard",    "file": "frame_on_vanguard.mp3" }
-      ]
-    }
+Drop the file in this folder and add an entry:
 
-Ids must match the script exactly. Human players will always fall back to the
-synthesiser — their names are not knowable in advance.
+    { "id": "booth_aussie_x", "file": "booth_aussie_x.mp3",
+      "persona": "aussie", "seconds": 3.2, "slot": "round", "text": "..." }
+
+`seconds` only matters for the `intro` fit check. `persona` is any string —
+the booth simply prefers whichever one did not speak last.
+
+## No player names
+
+The booth never reads names. No recording can say a name it has never heard,
+and stitching one in from the browser's synthesiser sounded worse than not
+saying it at all.

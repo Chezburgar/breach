@@ -149,6 +149,7 @@ export class Game {
     net.on('dryfire', () => this.audio.click('dry'));
     net.on('streak', (msg) => {
       if (msg.id === net.id) this.hud.streak(`${msg.count} ELIMINATION STREAK`);
+      if (msg.count >= 3) this.commentator.callSting();
     });
     net.on('round.start', (msg) => {
       this.round = msg.round;
@@ -160,6 +161,8 @@ export class Game {
       this.hud.hideDeath();
       this.hud.roundBanner(`ROUND ${msg.round}`, this.roundSubtitle(msg.scores), 2200);
       this.audio.countdownBeep(false);
+      // Not on the first round: the intro monologue has only just finished.
+      if (msg.round > 1) this.commentator.callRound();
     });
     net.on('round.live', () => {
       this.hud.toast('GO', 800);
@@ -170,6 +173,7 @@ export class Game {
       const mine = msg.winner === this.myTeam;
       const title = msg.winner < 0 ? 'ROUND DRAW' : (mine ? 'ROUND WON' : 'ROUND LOST');
       this.hud.roundBanner(title, this.roundSubtitle(msg.scores), 4000);
+      this.commentator.callRound();
     });
 
     net.on('grenade.throw', (msg) => {
@@ -297,8 +301,9 @@ export class Game {
       this.phaseRemaining = msg.intro;
       this.hud.showIntro({ ...this.match, players: msg.players }, this.net.id);
       this.commentator.setEnabled(this.profile.settings.commentary !== false);
-      this.commentator.callRoster(msg.players, Array.isArray(msg.teams) ? msg.teams : null,
-        this.match.mapName);
+      // The booth gets the fly-through to itself, and only a line short
+      // enough to finish inside it.
+      this.commentator.callIntro((msg.intro || MATCH.introDuration) - 1.2);
       this.audio.startIntroBed();
       this.introAngle = 0;
     } else {
@@ -555,6 +560,8 @@ export class Game {
       again: () => this.net.restartMatch?.(),
       leave: () => { this.net.leave(); this.leaveMatch(); },
     });
+    // The booth signs off before the fanfare takes the room.
+    this.commentator.callRound();
     if (msg.fanfare) this.audio.playFanfare(msg.fanfare);
 
     const mine = msg.board.find((p) => p.id === this.net.id);
@@ -575,7 +582,7 @@ export class Game {
   }
 
   leaveMatch() {
-    this.commentator.cancel();
+    this.commentator.stop();
     this.inMatch = false;
     this.phase = PHASE.NONE;
     this.match = null;
