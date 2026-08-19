@@ -773,34 +773,10 @@ function meta(b) {
   ];
   for (const [x, y, z, yaw] of defend) b.spawn(1, x, y, z, yaw);
 
-  // Cashout fields four crews, so the flanks get squads too: west of the
-  // chapel and east of the stables, the same distance from the middle as the
-  // north and south spawns are.
-  const west = [
-    [-78, 0, -4, 1.57], [-78, 0, 4, 1.57], [-74, 0, 0, 1.57],
-    [-82, 0, 0, 1.57], [-78, 0, -12, 1.57], [-78, 0, 12, 1.57],
-  ];
-  for (const [x, y, z, yaw] of west) b.spawn(2, x, y, z, yaw);
-
-  const east = [
-    [78, 0, -4, -1.57], [78, 0, 4, -1.57], [74, 0, 0, -1.57],
-    [82, 0, 0, -1.57], [78, 0, -12, -1.57], [78, 0, 12, -1.57],
-  ];
-  for (const [x, y, z, yaw] of east) b.spawn(3, x, y, z, yaw);
-
   for (const [x, y, z, yaw] of [
     [0, 0, -40, 0], [0, 0, 40, Math.PI], [-52, 0, 0, 1.57], [52, 0, 0, -1.57],
     [0, F1, 16, 0], [0, 0, -20, 0],
   ]) b.spawn(-1, x, y, z, yaw, ['ffa']);
-
-  // --- cashout: two vaults, two terminals -------------------------------
-  // Vaults sit inside buildings so taking the box means committing to a
-  // room; terminals sit out where the approach can be watched, because the
-  // fight is supposed to happen at the bank rather than at the pickup.
-  b.objective('vault_manor', 'vault', 8, F0, -4, 2.6, { name: 'Great Hall Vault' });
-  b.objective('vault_stable', 'vault', 53, FLOOR, 0, 2.6, { name: 'Stable Vault' });
-  b.objective('term_chapel', 'terminal', -53, FLOOR, 6, 3.2, { name: 'Chapel Terminal' });
-  b.objective('term_garden', 'terminal', 0, FLOOR, 44, 3.2, { name: 'Garden Terminal' });
 
   // --- navigation -------------------------------------------------------
   // Waypoint positions are taken from the wall openings and stair flights

@@ -117,7 +117,6 @@ export class HUD {
     this.renderGrenades(s);
     this.renderDrone(s);
     this.renderDroneFeed(s);
-    this.renderCashout(s);
     this.renderSpectate(s);
   }
 
@@ -197,50 +196,6 @@ export class HUD {
     }
     // The bar drains as the scanner recharges.
     $('df-scan').querySelector('i').style.width = `${Math.max(0, (1 - cd / max)) * 100}%`;
-  }
-
-  /**
-   * Cashout's standings and terminal. Four crews will not fit the two-sided
-   * score strip, so they get their own row; the terminal bar is coloured by
-   * whoever currently owns the countdown, which is the one fact that decides
-   * whether you push it or hold it.
-   */
-  renderCashout(s) {
-    const hud = $('cash-hud');
-    const on = !!s.cash;
-    hud.classList.toggle('hidden', !on);
-    $('cash-prompt').classList.toggle('hidden', !on || !s.cashPrompt);
-    if (!on) return;
-
-    const key = s.cash.map((c, i) => `${i}:${c}`).join('|') + `|${s.myTeam}`;
-    if (key !== this.cashKey) {
-      this.cashKey = key;
-      const host = $('cash-crews');
-      host.innerHTML = '';
-      const order = s.cash.map((c, i) => [c, i]).sort((a, b) => b[0] - a[0]);
-      for (const [amount, team] of order) {
-        const info = s.teamInfo?.[team];
-        const el = document.createElement('div');
-        el.className = `cash-crew ${team === s.myTeam ? 'mine' : ''}`;
-        el.style.color = info?.color || '#9aa3b0';
-        el.innerHTML = `${escapeHtml(info?.name || `CREW ${team + 1}`)} <b>$${amount.toLocaleString()}</b>`;
-        host.appendChild(el);
-      }
-    }
-
-    const term = $('cash-term');
-    term.classList.toggle('hidden', !s.cashActive);
-    if (s.cashActive) {
-      const a = s.cashActive;
-      const info = s.teamInfo?.[a.team];
-      term.style.color = info?.color || '#fff';
-      $('ct-owner').textContent = info?.name || 'CASHING OUT';
-      $('ct-where').textContent = formatTime(a.left);
-      $('ct-fill').style.width = `${Math.max(0, Math.min(1, 1 - a.left / (s.cashoutTime || 75))) * 100}%`;
-      $('ct-steal').classList.toggle('hidden', a.by == null || a.by < 0);
-    }
-
-    if (s.cashPrompt) $('cash-prompt-text').textContent = s.cashPrompt;
   }
 
   renderSpectate(s) {

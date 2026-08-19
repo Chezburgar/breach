@@ -245,14 +245,10 @@ function simulateMatch(modeId, seconds = 90) {
 
   const events = {
     kills: 0, shots: 0, captures: 0, rounds: 0, grenades: 0,
-    deposits: 0, banked: 0, steals: 0,
     ended: null, started: null, errors: [],
   };
   room.broadcast = (msg) => {
     if (msg.t === 'kill') events.kills++;
-    if (msg.t === 'cash.deposit') events.deposits++;
-    if (msg.t === 'cash.banked') { events.banked++; events.captures++; }
-    if (msg.t === 'cash.steal') events.steals++;
     if (msg.t === 'round.end') events.rounds++;
     if (msg.t === 'grenade.pop') events.grenades++;
     if (msg.t === 'match.end') events.ended = msg;
@@ -316,7 +312,7 @@ function checkMatches() {
   const SECONDS = 180;
   console.log(`\nMATCH SIMULATION (8 bots, ${SECONDS}s of game time each)`);
   for (const modeId of MODE_IDS) {
-    const r = simulateMatch(modeId, MODES[modeId].cashout ? 260 : SECONDS);
+    const r = simulateMatch(modeId, SECONDS);
     ok(r.events.errors.length === 0, `${modeId}: no exceptions`,
       r.events.errors[0] ? r.events.errors[0].stack?.split('\n')[0] : '');
     // One in the Chamber gives each player a single round, so shot volume is
@@ -326,22 +322,8 @@ function checkMatches() {
     ok(r.events.kills > 0, `${modeId}: eliminations registered`, `${r.events.kills} kills`);
     ok(r.embedded === 0, `${modeId}: no player stuck in geometry`, `${r.embedded} embedded`);
 
-    // Breach resolves rounds; Cashout has none, and is judged on whether the
-    // bots actually played the objective rather than just shot at each other.
-    if (MODES[modeId].cashout) {
-      ok(r.events.deposits > 0, `${modeId}: bots worked the objective`,
-        `${r.events.deposits} deposits, ${r.events.banked} banked`);
-    } else {
-      ok(r.events.rounds > 0, `${modeId}: rounds resolved`, `${r.events.rounds} rounds`);
-    }
+    ok(r.events.rounds > 0, `${modeId}: rounds resolved`, `${r.events.rounds} rounds`);
     ok(r.events.grenades > 0, `${modeId}: grenades thrown and detonated`, `${r.events.grenades} pops`);
-
-    // A cashout match runs to a clock far longer than the harness simulates,
-    // so it is only checked when it actually reached an ending.
-    if (MODES[modeId].cashout && !r.events.ended) {
-      console.log(`        ${r.events.kills} kills · ${r.events.shots} shots · ${r.events.banked} cashouts · ${r.events.steals} steals`);
-      continue;
-    }
 
     const e = r.events.ended;
     const boardOk = e && Array.isArray(e.board) && e.board.length === 8 &&
