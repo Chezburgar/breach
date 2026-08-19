@@ -32,7 +32,7 @@ const CONNECT_TIMEOUT = 4000;
 // deliberately has no build step for the game itself.
 const PeerCtor = () => window.Peer || window.peerjs?.Peer;
 
-const slotId = (n) => `${PREFIX}-pub-${n}`;
+const slotId = (mode, n) => `${PREFIX}-${mode}-pub-${n}`;
 const codeId = (code) => `${PREFIX}-room-${String(code).toUpperCase()}`;
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -226,11 +226,14 @@ export class Session {
    * load") does the exact opposite and leaves everybody hosting an empty lobby
    * of their own.
    */
-  quickPlay() {
-    return this.attempt(() => this.runQuickPlay());
+  quickPlay(mode = DEFAULT_MODE) {
+    return this.attempt(() => this.runQuickPlay(mode));
   }
 
-  async runQuickPlay() {
+  async runQuickPlay(mode) {
+    // Decided before anything opens: the slot names are per mode, and the
+    // room the host builds is shaped by it.
+    this.pendingMode = MODES[mode] ? mode : DEFAULT_MODE;
     this.setStatus('connecting', 'contacting relay');
     await this.open();
 
@@ -238,7 +241,7 @@ export class Session {
 
     for (const n of slots) {
       this.setStatus('searching', `lobby ${n}`);
-      const conn = await this.tryJoin(slotId(n));
+      const conn = await this.tryJoin(slotId(this.pendingMode, n));
       if (!conn) continue;
       const joined = await this.handshake(conn);
       // A full lobby turns us away; carry on to the next slot.
@@ -250,13 +253,13 @@ export class Session {
     for (const n of slots) {
       try {
         this.setStatus('hosting', `opening lobby ${n}`);
-        await this.open(slotId(n));
+        await this.open(slotId(this.pendingMode, n));
         return this.becomeHost(`PUB${n}`, { isPrivate: false, slot: n });
       } catch (err) {
         if (err?.type !== 'unavailable-id') throw err;
         // Someone claimed it while we were looking; join them instead.
         await this.open();
-        const conn = await this.tryJoin(slotId(n));
+        const conn = await this.tryJoin(slotId(this.pendingMode, n));
         if (conn && await this.handshake(conn)) return this.becomeGuest(conn, `PUB${n}`);
       }
     }
@@ -700,7 +703,7 @@ export class Session {
       mode: this.pendingMode,
       members,
       found: members.length,
-      target: MATCH_TARGET,
+      target: this.room ? this.room.fillTarget() : MATCH_TARGET,
       wait: Math.round(this.lobbyAge()),
       fillAt: Math.round(this.fillDeadline()),
     });
@@ -724,8 +727,9 @@ export class Session {
 
     const humans = this.clients.size;
     const age = this.lobbyAge();
+    const target = this.room ? this.room.fillTarget() : MATCH_TARGET;
 
-    const ready = humans >= MATCH_TARGET
+    const ready = humans >= target
       || (humans >= 4 && age >= LOBBY_PARTIAL_WAIT)
       || (humans >= 1 && age >= LOBBY_FILL_WAIT);
 
