@@ -100,7 +100,10 @@ export const HIT_MULTIPLIER = {
 };
 
 export const MATCH = {
-  introDuration: 11.5,       // pregame banner intro
+  // Long enough for the three opening commentary lines to run in order
+  // (24.4s of audio plus air). The fly-through stretches to fill it, so
+  // trimming a line here means trimming the camera move too.
+  introDuration: 26.0,       // pregame fly-through and booth intro
   warmupDuration: 5.0,       // countdown after the intro
   outroDuration: 14.0,       // victory screen + fanfare
   respawnDelay: 3.2,

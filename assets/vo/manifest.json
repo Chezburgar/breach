@@ -1,124 +1,124 @@
 {
   "clips": [
     {
-      "id": "booth_analyst_185031",
-      "file": "booth_analyst_185031.mp3",
-      "persona": "analyst",
+      "id": "intro_1",
+      "file": "intro_1.mp3",
+      "slot": "intro",
       "seconds": 11.15,
+      "order": 1,
+      "text": "intro 1"
+    },
+    {
+      "id": "intro_2",
+      "file": "intro_2.mp3",
       "slot": "intro",
-      "text": ""
-    },
-    {
-      "id": "booth_analyst_185404",
-      "file": "booth_analyst_185404.mp3",
-      "persona": "analyst",
-      "seconds": 6.92,
-      "slot": "intro",
-      "text": ""
-    },
-    {
-      "id": "booth_analyst_185458",
-      "file": "booth_analyst_185458.mp3",
-      "persona": "analyst",
-      "seconds": 2.69,
-      "slot": "sting",
-      "text": ""
-    },
-    {
-      "id": "booth_analyst_185938",
-      "file": "booth_analyst_185938.mp3",
-      "persona": "analyst",
-      "seconds": 2.43,
-      "slot": "sting",
-      "text": ""
-    },
-    {
-      "id": "booth_analyst_190006",
-      "file": "booth_analyst_190006.mp3",
-      "persona": "analyst",
-      "seconds": 2.12,
-      "slot": "sting",
-      "text": ""
-    },
-    {
-      "id": "booth_analyst_190101",
-      "file": "booth_analyst_190101.mp3",
-      "persona": "analyst",
-      "seconds": 4.05,
-      "slot": "round",
-      "text": ""
-    },
-    {
-      "id": "booth_analyst_190225",
-      "file": "booth_analyst_190225.mp3",
-      "persona": "analyst",
-      "seconds": 3.63,
-      "slot": "round",
-      "text": ""
-    },
-    {
-      "id": "booth_analyst_190419",
-      "file": "booth_analyst_190419.mp3",
-      "persona": "analyst",
-      "seconds": 3.47,
-      "slot": "round",
-      "text": ""
-    },
-    {
-      "id": "booth_aussie_185256",
-      "file": "booth_aussie_185256.mp3",
-      "persona": "aussie",
       "seconds": 6.35,
+      "order": 2,
+      "text": "intro 2"
+    },
+    {
+      "id": "intro_3",
+      "file": "intro_3.mp3",
       "slot": "intro",
-      "text": ""
+      "seconds": 6.92,
+      "order": 3,
+      "text": "intro 3"
     },
     {
-      "id": "booth_aussie_185558",
-      "file": "booth_aussie_185558.mp3",
-      "persona": "aussie",
-      "seconds": 4.36,
-      "slot": "round",
-      "text": ""
+      "id": "elim_vanguard_1",
+      "file": "elim_vanguard_1.mp3",
+      "slot": "elim",
+      "seconds": 2.12,
+      "team": 0,
+      "text": "vanguard gets a kill"
     },
     {
-      "id": "booth_aussie_185709",
-      "file": "booth_aussie_185709.mp3",
-      "persona": "aussie",
-      "seconds": 2.27,
-      "slot": "sting",
-      "text": ""
-    },
-    {
-      "id": "booth_aussie_185740",
-      "file": "booth_aussie_185740.mp3",
-      "persona": "aussie",
+      "id": "elim_vanguard_2",
+      "file": "elim_vanguard_2.mp3",
+      "slot": "elim",
       "seconds": 1.72,
-      "slot": "sting",
-      "text": ""
+      "team": 0,
+      "text": "vanguard gets an elim"
     },
     {
-      "id": "booth_aussie_185849",
-      "file": "booth_aussie_185849.mp3",
-      "persona": "aussie",
+      "id": "elim_vanguard_3",
+      "file": "elim_vanguard_3.mp3",
+      "slot": "elim",
+      "seconds": 4.36,
+      "team": 0,
+      "text": "vanguard gets an elimination"
+    },
+    {
+      "id": "elim_sentinel_1",
+      "file": "elim_sentinel_1.mp3",
+      "slot": "elim",
+      "seconds": 4.05,
+      "team": 1,
+      "text": "sentinal gets a kill"
+    },
+    {
+      "id": "elim_sentinel_2",
+      "file": "elim_sentinel_2.mp3",
+      "slot": "elim",
+      "seconds": 2.27,
+      "team": 1,
+      "text": "sentinal gets an elim"
+    },
+    {
+      "id": "elim_sentinel_3",
+      "file": "elim_sentinel_3.mp3",
+      "slot": "elim",
+      "seconds": 2.69,
+      "team": 1,
+      "text": "sentinal gets an elimination"
+    },
+    {
+      "id": "last_vanguard",
+      "file": "last_vanguard.mp3",
+      "slot": "last",
       "seconds": 3.97,
-      "slot": "round",
-      "text": ""
+      "team": 0,
+      "text": "vangueard have 1 standing"
     },
     {
-      "id": "booth_aussie_190306",
-      "file": "booth_aussie_190306.mp3",
-      "persona": "aussie",
+      "id": "last_sentinel",
+      "file": "last_sentinel.mp3",
+      "slot": "last",
+      "seconds": 2.43,
+      "team": 1,
+      "text": "sentinal has 1 standing"
+    },
+    {
+      "id": "round_vanguard",
+      "file": "round_vanguard.mp3",
+      "slot": "round",
+      "seconds": 3.63,
+      "team": 0,
+      "text": "vanguard wins round"
+    },
+    {
+      "id": "round_sentinel",
+      "file": "round_sentinel.mp3",
+      "slot": "round",
       "seconds": 3.71,
-      "slot": "round",
-      "text": ""
+      "team": 1,
+      "text": "sentinal wins round"
     },
     {
-      "id": "booth_aussie_190341",
-      "file": "booth_aussie_190341.mp3",
-      "persona": "aussie",
+      "id": "win_vanguard",
+      "file": "win_vanguard.mp3",
+      "slot": "win",
       "seconds": 3.4,
-      "slot": "round",
-      "text": ""
+      "team": 0,
+      "text": "vanguard wins game"
+    },
+    {
+      "id": "win_sentinel",
+      "file": "win_sentinel.mp3",
+      "slot": "win",
+      "seconds": 3.47,
+      "team": 1,
+      "text": "sentinal wins game"
     }
   ]
 }

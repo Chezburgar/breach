@@ -1,51 +1,48 @@
 # Commentary booth
 
-Fifteen ElevenLabs lines from two personas — an analyst and an Aussie colour
-commentator. The booth alternates between them so consecutive lines sound like
-two people rather than one on a loop, and never plays the same clip twice
-running.
+Recorded lines played against match events. Which clip belongs to which moment
+lives entirely in `manifest.json` — nothing in the game code names a file.
 
     node tools/vo-list.js
 
-lists every clip, its length, and the slot it is in.
-
 ## Slots
 
-Slots decide *when* a line can play:
+| slot    | when                                    | team |
+|---------|-----------------------------------------|------|
+| `intro` | the pre-game fly-through, in `order`    | —    |
+| `elim`  | that side got an elimination            | yes  |
+| `last`  | that side is down to one player         | yes  |
+| `round` | that side won the round                 | yes  |
+| `win`   | that side won the match                 | yes  |
 
-| slot    | when                                          |
-|---------|-----------------------------------------------|
-| `intro` | under the pre-game fly-through                |
-| `round` | a round starting or ending, and the match end  |
-| `sting` | short punctuation — a three-kill streak        |
+`team` is `0` for Vanguard, `1` for Sentinel. A slot with several clips for a
+side picks between them at random, never the same one twice running.
 
-An `intro` clip is only chosen if it fits inside the fly-through, so a line
-longer than the intro is skipped rather than cut off.
+## Two rules
 
-## These clips were slotted by length, not by content
+**Nothing overlaps.** One line at a time, always.
 
-Length is the only thing about an audio file that can be read without
-listening to it — so the initial slotting is a guess: over six seconds went to
-`intro`, three to six to `round`, under three to `sting`.
+**Late is worse than silent.** A booth only convinces if it reacts to what
+just happened, so a line that waited too long is dropped rather than played
+against the wrong moment. Each slot has its own patience: a win announcement
+never expires, a round result waits six seconds, an elimination call is stale
+after 1.6 and is thrown away. Higher-priority lines jump the queue — a match
+win interrupts nothing but is served before any elimination still waiting.
 
-**Listen to them and fix the ones that landed wrong.** Edit `slot` in
-`manifest.json`; nothing in the game code names a clip, so that file is the
-only place the booth is configured. Fill in `text` while you are there — it is
-never read by the game, but a line you cannot identify is a line you cannot
-place.
+A kill that leaves a side on their last player calls `last` rather than
+`elim`: it is the more interesting fact, and saying both would be two lines
+about one event.
+
+## The intro runs 24.4 seconds
+
+Three lines in order, so `MATCH.introDuration` in `shared/constants.js` is
+26 seconds and the fly-through stretches to fill it. Shorten one and the other
+has to follow, or the camera lands before the booth stops talking.
 
 ## Adding more
 
-Drop the file in this folder and add an entry:
+    { "id": "elim_vanguard_4", "file": "elim_vanguard_4.mp3",
+      "slot": "elim", "team": 0, "seconds": 2.4, "text": "..." }
 
-    { "id": "booth_aussie_x", "file": "booth_aussie_x.mp3",
-      "persona": "aussie", "seconds": 3.2, "slot": "round", "text": "..." }
-
-`seconds` only matters for the `intro` fit check. `persona` is any string —
-the booth simply prefers whichever one did not speak last.
-
-## No player names
-
-The booth never reads names. No recording can say a name it has never heard,
-and stitching one in from the browser's synthesiser sounded worse than not
-saying it at all.
+`seconds` is only used to keep an intro line inside the fly-through. `text` is
+never read by the game — it is there so you can tell the files apart.
