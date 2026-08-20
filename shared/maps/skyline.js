@@ -52,10 +52,23 @@ const CON = { x0: -42, z0: 40, x1: -18, z1: 62 };     // Conservatory     (SW)
 const CAS = { x0: 18, z0: 40, x1: 42, z1: 62 };       // Cascade Apts     (SE)
 
 // Metro stair shafts, cut out of every ground deck above them.
-const SHAFT_COURT = [-4.4, -44, 0.4, -36];   // open, in the north court
-const SHAFT_SANCT = [1.6, 14, 6.4, 22];      // inside the sanctuary
-const SHAFT_ROW = [-6.4, 30, -1.6, 38];      // in Cathedral Row
-const SHAFT_HALL = [22, -42, 26.8, -34];     // inside the transit hall
+//
+// A shaft is exactly as long as the flight that fills it, and derived from it
+// rather than written down twice. Cut a metre longer than the stairs — which
+// is what these were — and the head of every flight ends a stride short of
+// the ground, with an open pit in between.
+const SHAFT_STEPS = 22, SHAFT_RUN = 0.32;
+const SHAFT_LEN = SHAFT_STEPS * SHAFT_RUN;
+
+/** A shaft of the right length, measured back from the foot of its stairs. */
+const shaftAt = (x0, x1, foot, dir) => (dir < 0
+  ? [x0, foot - SHAFT_LEN, x1, foot]
+  : [x0, foot, x1, foot + SHAFT_LEN]);
+
+const SHAFT_COURT = shaftAt(-4.4, 0.4, -36, -1);   // open, in the north court
+const SHAFT_SANCT = shaftAt(1.6, 6.4, 14, 1);      // inside the sanctuary
+const SHAFT_ROW = shaftAt(-6.4, -1.6, 30, 1);      // in Cathedral Row
+const SHAFT_HALL = shaftAt(22, 26.8, -34, -1);     // inside the transit hall
 const GROUND_HOLES = [SHAFT_COURT, SHAFT_SANCT, SHAFT_ROW, SHAFT_HALL];
 
 /**
@@ -414,7 +427,7 @@ function transitHall(b) {
   // cannot walk past on the way up: the base oversails the shaft and the
   // step up onto the last tread has nowhere to put your head.
   const overShaft = (x, z) => x > SHAFT_HALL[0] - 1.2 && x < SHAFT_HALL[2] + 1.2
-    && z > SHAFT_HALL[1] - 1.2 && z < SHAFT_HALL[3] + 1.2;
+    && z > SHAFT_HALL[1] - 3.5 && z < SHAFT_HALL[3] + 3.5;   // and clear of the way out
   for (const x of [24, 33]) {
     for (const z of [-51, -44, -37]) {
       if (!overShaft(x, z)) b.pillar(x, z, L0, L1 - 0.5, 0.45, 'stone', 'marble');
@@ -943,10 +956,10 @@ function metro(b) {
    * rather than a roofless box you get wedged in.
    */
   const shaft = (hole, dir, mat = 'concrete') => {
-    const steps = 22;
     const zStart = dir < 0 ? hole[3] : hole[1];
+    // Fills the opening in both directions: the run is what set its length.
     b.stairs((hole[0] + hole[2]) / 2, Y, zStart, dir < 0 ? 0 : Math.PI,
-      steps, Math.abs(Y) / steps, 0.32, hole[2] - hole[0], mat);
+      SHAFT_STEPS, Math.abs(Y) / SHAFT_STEPS, SHAFT_RUN, hole[2] - hole[0], mat);
     const TOPH = 1.1;
     b.ext(hole[0] - 0.9, Y, hole[1], hole[0] + 0.03, 0, hole[3], mat);
     b.ext(hole[2] - 0.03, Y, hole[1], hole[2] + 0.9, 0, hole[3], mat);

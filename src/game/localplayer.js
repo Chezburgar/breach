@@ -175,7 +175,7 @@ export class LocalPlayer {
     const shots = [];
     for (let i = 0; i < rw.pellets; i++) {
       const d = this.sampleSpread(dir, rw.pellets > 1 ? cone : spread, this.shotIndex, i);
-      const hit = raycastWorld(this.world, eye, d, 260, { sightOnly: true });
+      const hit = raycastWorld(this.world, eye, d, 260, { shots: true });
       shots.push({
         dir: d,
         end: hit ? hit.point : { x: eye.x + d.x * 260, y: eye.y + d.y * 260, z: eye.z + d.z * 260 },
