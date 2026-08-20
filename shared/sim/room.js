@@ -676,7 +676,7 @@ export class GameRoom {
    */
   traceShot(shooter, origin, dir, rw, frame) {
     const MAX = 260;
-    const wallHit = raycastWorld(this.world, origin, dir, MAX, { sightOnly: true });
+    const wallHit = raycastWorld(this.world, origin, dir, MAX, { shots: true });
     const wallT = wallHit ? wallHit.t : MAX;
 
     // A bulwark eats rounds from the far side and lets its owners' through,
@@ -1139,7 +1139,7 @@ export class GameRoom {
         const dist = Math.hypot(step.x, step.y, step.z);
         if (dist < 1e-5) break;
         const dir = { x: step.x / dist, y: step.y / dist, z: step.z / dist };
-        const hit = raycastWorld(this.world, g.pos, dir, dist + 0.07, { sightOnly: true });
+        const hit = raycastWorld(this.world, g.pos, dir, dist + 0.07, { shots: true });
 
         if (!hit) {
           g.pos.x += step.x; g.pos.y += step.y; g.pos.z += step.z;

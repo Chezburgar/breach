@@ -4,7 +4,7 @@
 // simulates full matches of every mode with bots to shake out server bugs.
 
 import { getMap, MAP_IDS, COMBAT_MAPS, MAP_INFO } from '../shared/maps/index.js';
-import { buildWorld, cylinderBlocked, raycastWorld } from '../shared/collision.js';
+import { buildWorld, cylinderBlocked, raycastWorld, groundUnder, hasLineOfSight } from '../shared/collision.js';
 import { createPlayerState, stepPlayer } from '../shared/controller.js';
 import { FIXED_DT, PLAYER, BTN, MOVE } from '../shared/constants.js';
 import { MODE_IDS, MODES } from '../shared/modes.js';
@@ -206,6 +206,62 @@ function propsInGeometry(md) {
   return bad;
 }
 
+/**
+ * Where a flight of stairs ends, the floor has to carry on.
+ *
+ * A stair shaft is cut into the decks above it, and if the cut is longer than
+ * the flight that fills it the last tread stops short of the ground with an
+ * open pit in between. Every metro shaft on the city map was a metre long in
+ * exactly that way.
+ */
+function stairHeads(md, world) {
+  const bad = [];
+  for (const f of md.flights || []) {
+    const fx = -Math.sin(f.yaw), fz = -Math.cos(f.yaw);
+    const len = f.steps * f.run;
+    const top = f.y + f.steps * f.rise;
+    for (let d = len; d <= len + 1.6; d += 0.25) {
+      const g = groundUnder(world, f.x + fx * d, f.z + fz * d, PLAYER.radius, top + 0.3, top - 2.0);
+      if (g === -Infinity || top - g > PLAYER.stepHeight) {
+        bad.push(`(${f.x.toFixed(0)}, ${f.y.toFixed(1)}, ${f.z.toFixed(0)}) — `
+          + `${(d - len).toFixed(2)}m past the top tread the floor `
+          + (g === -Infinity ? 'is missing' : `drops ${(top - g).toFixed(2)}m`));
+        break;
+      }
+    }
+  }
+  return bad;
+}
+
+/**
+ * Glazing is see-through and not shoot-through.
+ *
+ * Both halves matter and they are decided by different flags, so it is easy
+ * to change one and not the other — which is how windows ended up stopping
+ * neither.
+ */
+function glassBehaviour(md, world) {
+  const worldSize = (b) => {
+    const c = Math.abs(Math.cos(b.r || 0)), sn = Math.abs(Math.sin(b.r || 0));
+    return [c * b.s[0] + sn * b.s[2], b.s[1], sn * b.s[0] + c * b.s[2]];
+  };
+  let panes = 0, stops = 0, sees = 0;
+  for (const g of md.boxes.filter((b) => b.m === 'glass')) {
+    const ws = worldSize(g);
+    const thin = ws.indexOf(Math.min(...ws));
+    if (thin === 1) continue;                       // skylights are shot from above
+    panes++;
+    const dir = { x: 0, y: 0, z: 0 };
+    dir['xyz'[thin]] = 1;
+    const from = { x: g.p[0] - dir.x * 1.5, y: g.p[1] - dir.y * 1.5, z: g.p[2] - dir.z * 1.5 };
+    const to = { x: g.p[0] + dir.x * 1.5, y: g.p[1] + dir.y * 1.5, z: g.p[2] + dir.z * 1.5 };
+    const shot = raycastWorld(world, from, dir, 3, { shots: true });
+    if (shot && shot.box.mat === 'glass') stops++;
+    if (hasLineOfSight(world, from, to)) sees++;
+  }
+  return { panes, stops, sees };
+}
+
 // ---------------------------------------------------------------- geometry
 function checkMaps() {
   console.log('\nMAPS');
@@ -293,6 +349,20 @@ function checkMaps() {
     ok(stairFaults.length === 0, `${id}: every flight of stairs is climbable`,
       `${stairFaults.length}/${(md.flights || []).length * 2} runs failed:\n        `
         + stairFaults.join('\n        '));
+
+    const heads = stairHeads(md, world);
+    ok(heads.length === 0, `${id}: the floor carries on past the top of every flight`,
+      `${heads.length}:
+        ` + heads.slice(0, 5).join(`
+        `));
+
+    const gl = glassBehaviour(md, world);
+    // A pane can legitimately have something else in front of it, so this is
+    // about the great majority rather than every last one.
+    ok(gl.panes === 0 || gl.stops >= gl.panes * 0.95, `${id}: rounds stop at glass`,
+      `${gl.stops}/${gl.panes} panes`);
+    ok(gl.panes === 0 || gl.sees >= gl.panes * 0.8, `${id}: you can still see through it`,
+      `${gl.sees}/${gl.panes} panes`);
 
     const inside = propsInGeometry(md);
     ok(inside.length === 0, `${id}: no prop grows through the building it stands in`,

@@ -27,6 +27,12 @@ export function buildWorld(mapData) {
       hx, hy, hz, yaw, sin, cos,
       solid: b.solid !== false,
       blocksSight: b.blocksSight !== false && b.solid !== false,
+      // What stops a bullet is not what blocks a view. A railing is see
+      // through and shoot through; a window is see through and not. Glazing
+      // is the only thing that separates the two, so it is named here rather
+      // than inferred at every ray.
+      stopsShots: b.solid !== false
+        && (b.blocksSight !== false || b.glass === true || b.m === 'glass'),
       mat: b.m || 'concrete',
       tag: b.t || '',
       minx: b.p[0] - ex, maxx: b.p[0] + ex,
@@ -294,8 +300,16 @@ export function rayOBB(ox, oy, oz, dx, dy, dz, cx, cy, cz, hx, hy, hz, sin, cos,
  * Cast a ray through the static world.
  * @returns {{t:number, point:{x,y,z}, normal:{x,y,z}, box:object}|null}
  */
+/**
+ * First solid the ray meets.
+ *
+ * @param opts.sightOnly only surfaces that block a view — for line of sight.
+ * @param opts.shots     only surfaces that stop a round — for bullets and
+ *                       grenades. Differs from the above by glass alone.
+ */
 export function raycastWorld(world, origin, dir, maxDist, opts = {}) {
   const sightOnly = !!opts.sightOnly;
+  const shotsOnly = !!opts.shots;
   let bestT = maxDist;
   let bestBox = null;
   const normal = { x: 0, y: 0, z: 0 };
@@ -317,6 +331,7 @@ export function raycastWorld(world, origin, dir, maxDist, opts = {}) {
       seen.add(idx);
       const b = world.boxes[idx];
       if (sightOnly && !b.blocksSight) continue;
+      if (shotsOnly && !b.stopsShots) continue;
       const t = rayOBB(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z,
         b.cx, b.cy, b.cz, b.hx, b.hy, b.hz, b.sin, b.cos, tmpN);
       if (t >= 0 && t < bestT) {
