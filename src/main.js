@@ -7,6 +7,9 @@ import { Game } from './game/game.js';
 import { HUD } from './ui/hud.js';
 import { Menu, loadProfile, saveProfile } from './ui/menu.js';
 import { loadBannerManifest, registerBanner } from './ui/banners.js';
+import { COMBAT_MAPS, getMap } from '../shared/maps/index.js';
+import { buildWorld } from '../shared/collision.js';
+import { navGraphBuilder } from '../shared/sim/nav.js';
 
 const boot = document.getElementById('boot');
 const bootFill = document.getElementById('boot-fill');
@@ -212,6 +215,7 @@ async function main() {
   await progress(1.0, 'ready');
   boot.classList.add('hidden');
   menu.show();
+  warmNavGraphs();
 
   // --- main loop --------------------------------------------------------
   let last = performance.now();
@@ -238,6 +242,39 @@ async function main() {
 
   // Expose a small surface for debugging and for the authoring harness.
   window.__breach = { game, net, profile, audio, menu, step };
+}
+
+/**
+ * Work the bots' navigation graphs out while the player is reading the menu.
+ *
+ * Whoever is hosting has to have these before the first bot moves, and
+ * building one means simulating a walk between every pair of nearby
+ * waypoints — tens of seconds on the vertical map. Doing that when the match
+ * starts freezes the host's tab; doing it here costs idle time nobody is
+ * using. Any host can end up hosting after a migration, so every client warms
+ * its own. Progress is kept even if a match starts midway: the room picks up
+ * the same builder and finishes it.
+ */
+function warmNavGraphs() {
+  const idle = window.requestIdleCallback
+    ? (fn) => window.requestIdleCallback(fn, { timeout: 200 })
+    : (fn) => setTimeout(fn, 24);
+
+  const queue = COMBAT_MAPS.slice();
+  let builder = null;
+
+  const tick = () => {
+    if (!builder) {
+      const id = queue.shift();
+      if (!id) return;
+      const map = getMap(id);
+      builder = navGraphBuilder(buildWorld(map), map);
+    }
+    // Small slices: this is background work and must never cost a frame.
+    if (builder.advance(4)) builder = null;
+    idle(tick);
+  };
+  idle(tick);
 }
 
 main().catch((err) => {

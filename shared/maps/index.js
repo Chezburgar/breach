@@ -1,8 +1,10 @@
 import { buildEstate } from './estate.js';
+import { buildSkyline } from './skyline.js';
 import { buildTraining } from './training.js';
 
 const BUILDERS = {
   estate: buildEstate,
+  skyline: buildSkyline,
   training: buildTraining,
 };
 
@@ -18,7 +20,7 @@ export function getMap(id) {
 }
 
 export const MAP_IDS = Object.keys(BUILDERS);
-export const COMBAT_MAPS = ['estate'];
+export const COMBAT_MAPS = ['estate', 'skyline'];
 export const DEFAULT_MAP = 'estate';
 
 export const MAP_INFO = {
@@ -27,6 +29,12 @@ export const MAP_INFO = {
     name: 'Blackwood Estate',
     blurb: 'A walled country estate. Three routes from the gate to the gardens, a manor that overlooks all of them, and a cellar that cuts underneath.',
     size: '176 × 176 m',
+  },
+  skyline: {
+    id: 'skyline',
+    name: 'Skyline Sanctuary',
+    blurb: 'A downtown block at dusk. Two glass towers facing each other across a pedestrian court, sky bridges between them, and a metro concourse cutting underneath the lot.',
+    size: '176 × 176 m · vertical',
   },
   training: {
     id: 'training',
