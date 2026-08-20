@@ -51,7 +51,8 @@ function base(b) {
       }
     }
     placed.push({ x0, z0, x1, z1, level });
-    return b.slab(x0 - 0.03, z0 - 0.03, x1 + 0.03, z1 + 0.03, level * PATCH_STEP, 0.6, m);
+    const over = 0.03 + level * 0.011;
+    return b.slab(x0 - over, z0 - over, x1 + over, z1 + over, level * PATCH_STEP, 0.6, m);
   };
   patch(-86, -86, 86, 86, 'sand');
   // Downrange is dark asphalt so the targets read against it; the firing line
@@ -74,8 +75,10 @@ function range(b) {
   const X0 = -34, X1 = 34, Z_LINE = 24, Z_END = -66;
   const ROOF = 7.2;
 
-  // Covered firing line.
-  b.slab(X0, 16, X1, 34, ROOF, 0.4, 'metal');
+  // Covered firing line. Laid proud of the wall heads it sits on: level with
+  // them, the deck and the masonry share a plane and the whole back of the
+  // line flickers.
+  b.slab(X0, 16, X1, 34, ROOF + 0.06, 0.46, 'metal');
   // Posts sit half a lane off the lane centres. On them, the middle post
   // stood directly down lane four's line of fire and you could not see your
   // own targets.
