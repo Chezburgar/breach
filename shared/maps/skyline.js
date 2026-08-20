@@ -57,7 +57,23 @@ const SHAFT_SANCT = [1.6, 14, 6.4, 22];      // inside the sanctuary
 const SHAFT_ROW = [-6.4, 30, -1.6, 38];      // in Cathedral Row
 const SHAFT_HALL = [22, -42, 26.8, -34];     // inside the transit hall
 const GROUND_HOLES = [SHAFT_COURT, SHAFT_SANCT, SHAFT_ROW, SHAFT_HALL];
-const INNER_HOLES = GROUND_HOLES.map((h) => [h[0] - 0.05, h[1] - 0.05, h[2] + 0.05, h[3] + 0.05]);
+
+/**
+ * The same openings, cut a little wider.
+ *
+ * Every deck that a shaft passes through is cut to the same rectangle, and
+ * those decks overlap each other in height — the pavement patches sit a
+ * centimetre apart, the road slab runs under all of them, and the tunnel
+ * ceiling runs under that. Cut them all to one rectangle and their vertical
+ * cut faces land on the same plane, which is a wall of flickering right where
+ * the player is looking as they walk down the stairs. Each layer gets its own
+ * inset instead. The shaft lining oversails the opening by ninety
+ * centimetres, so every one of these edges is buried behind it.
+ */
+const widen = (by) => GROUND_HOLES.map((h) => [h[0] - by, h[1] - by, h[2] + by, h[3] + by]);
+const INNER_HOLES = widen(0.24);      // floors inside buildings
+const ROAD_HOLES = widen(0.30);       // the carriageway under everything
+const TUNNEL_HOLES = widen(0.42);     // the metro ceiling, lower still
 
 export function buildSkyline() {
   const b = new MapBuilder({
@@ -113,7 +129,7 @@ export function buildSkyline() {
 // ---------------------------------------------------------------- ground
 function ground(b) {
   // Carriageway under everything, then the surfaces that sit on it.
-  b.slabHoles(-96, -96, 96, 96, -0.4, 0.8, 'asphalt', GROUND_HOLES);
+  b.slabHoles(-96, -96, 96, 96, -0.4, 0.8, 'asphalt', ROAD_HOLES);
 
   // Each patch takes the lowest level that clears everything it touches, so
   // the stack stays a couple of centimetres tall however many get added.
@@ -126,8 +142,9 @@ function ground(b) {
       }
     }
     placed.push({ x0, z0, x1, z1, level });
-    return b.slabHoles(x0 - 0.04, z0 - 0.04, x1 + 0.04, z1 + 0.04,
-      level * PATCH_STEP, 0.65, m, GROUND_HOLES);
+    const over = 0.04 + level * 0.011;
+    return b.slabHoles(x0 - over, z0 - over, x1 + over, z1 + over,
+      level * PATCH_STEP, 0.65, m, widen(0.05 + level * 0.04));
   };
 
   patch(-96, -96, 96, 96, 'asphalt');
@@ -410,8 +427,8 @@ function transitHall(b) {
   for (let i = 0; i < 4; i++) {
     b.ext(27.5 + i * 1.8, L0, -41.4, 28.4 + i * 1.8, 1.15, -39.6, 'metal');   // ticket gates
   }
-  b.prop('stall', 37, L0, -50, { yaw: -1.57 });
-  b.prop('stall', 37, L0, -38, { yaw: -1.57 });
+  b.prop('stall', 22, L0, -50, { yaw: 1.57 });
+  b.prop('stall', 22, L0, -38, { yaw: 1.57 });
   b.prop('bench', 30, L0, -48);
   b.prop('bench', 30, L0, -46);
   for (const z of [-52, -44, -36]) b.light(28, L2 - 0.6, z, 0xfff0d2, 1.7, 18);
@@ -590,8 +607,8 @@ function tower(b, o) {
   b.ext(s.x0 + 2.4, o.shaftTop, s.z0 + 2.4, s.x1 - 2.4, o.shaftTop + 5.5, s.z1 - 2.4, 'precast');
   b.ext(s.x0 + 1.4, o.shaftTop - 4.2, s.z0 + 1.4, s.x1 - 1.4, o.shaftTop - 3.4, s.z1 - 1.4, 'windowglow');
   b.prop('antenna', (s.x0 + s.x1) / 2, o.shaftTop + 5.5, (s.z0 + s.z1) / 2, { scale: 1.8 });
-  b.prop('ac_unit', f.x0 + 4, TOP + 0.1, f.z0 + 4, { scale: 1.4 });
-  b.prop('ac_unit', f.x1 - 4, TOP + 0.1, f.z0 + 4, { scale: 1.4 });
+  b.prop('ac_unit', cx - 3, TOP + 0.1, f.z0 + 2.2, { scale: 1.2 });
+  b.prop('ac_unit', cx + 3, TOP + 0.1, f.z0 + 2.2, { scale: 1.2 });
 }
 
 // -------------------------------------------------------------- sanctuary
@@ -648,9 +665,9 @@ function sanctuary(b) {
 
   // The garden the place is named for: planting beds, a water table, and
   // enough trunk to break the sightline down the length of the atrium.
-  for (const [x, z] of [[-6, 6], [6, 6], [-6, 14], [6, 14]]) {
-    b.prop('tree', x, L0, z, { scale: 1.3 });
-    b.ext(x - 0.32, L0, z - 0.32, x + 0.32, L0 + 4.2, z + 0.32, 'bark');
+  for (const [x, z] of [[-3.2, 5], [3.2, 5], [-3.2, 13], [3.2, 13]]) {
+    b.prop('tree', x, L0, z, { scale: 0.82 });
+    b.ext(x - 0.26, L0, z - 0.26, x + 0.26, L0 + 3.4, z + 0.26, 'bark');
   }
   for (const [x, z] of [[-8.5, 2], [8.5, 2], [-8.5, 24], [8.5, 24]]) b.prop('planter', x, L0, z);
   b.ext(-2.4, L0, 8.4, 2.4, L0 + 0.55, 12.6, 'marble');            // water table
@@ -723,13 +740,13 @@ function conservatory(b) {
 
   // Under glass: beds deep enough to break a sightline, and a potting bench
   // run that gives the ground floor its cover.
-  for (const [x, z] of [[-28, 45], [-22, 45], [-28, 57], [-22, 57]]) {
-    b.prop('palm', x, L0, z, { scale: 1.4 });
-    b.ext(x - 0.28, L0, z - 0.28, x + 0.28, L0 + 3.6, z + 0.28, 'bark');
+  for (const [x, z] of [[-26, 47], [-26, 53]]) {
+    b.prop('palm', x, L0, z, { scale: 0.88 });
+    b.ext(x - 0.24, L0, z - 0.24, x + 0.24, L0 + 3.2, z + 0.24, 'bark');
   }
   for (const z of [44, 50, 56]) {
-    b.ext(-31.4, L0, z - 0.9, -28.6, L0 + 1.0, z + 0.9, 'woodDark');
-    b.prop('bush', -30, L0 + 1.0, z, { scale: 0.9 });
+    b.ext(-31.6, L0, z - 0.9, -29.6, L0 + 1.0, z + 0.9, 'woodDark');
+    b.prop('bush', -30.6, L0 + 1.0, z, { scale: 0.75 });
   }
   b.prop('hedge', -37, L0, 60, { scale: 1.4 });
   b.prop('hedge', -23, L0, 60, { scale: 1.4 });
@@ -838,7 +855,8 @@ function southTerrace(b) {
 
 // --------------------------------------------------------------- bridges
 /** A deck with a rail down each long side. Open, so using one is a decision. */
-function catwalk(b, x0, z0, x1, z1, y, mat = 'metal') {
+function catwalk(b, x0, z0, x1, z1, level, mat = 'metal') {
+  const y = level - 0.06;
   b.slab(x0, z0, x1, z1, y, 0.35, mat);
   if (x1 - x0 > z1 - z0) {
     b.railing(x0, z0, x1, z0, y, 'metal', 1.05);
@@ -872,25 +890,30 @@ function bridges(b) {
 // ----------------------------------------------------------------- metro
 function metro(b) {
   const Y = METRO, CTOP = -0.5, T = 0.8;
+  // Thick enough that its soffit sits below the road slab above it. Level
+  // with it, the two undersides were one plane and the whole concourse
+  // ceiling flickered — seven hundred square metres of it.
+  const CEIL_T = 0.95;
   const X0 = -8, X1 = 8, Z0 = -46, Z1 = 40;
 
   // Main concourse.
   b.slab(X0, Z0, X1, Z1, Y, 0.7, 'concrete');
-  b.slabHoles(X0, Z0, X1, Z1, CTOP, 0.7, 'concrete', GROUND_HOLES);
-  b.ext(X0 - T, Y, Z0, X0, CTOP, Z1, 'tile');
-  b.ext(X0, Y, Z0 - T, X1, CTOP, Z0, 'tile');
-  b.ext(X0, Y, Z1, X1, CTOP, Z1 + T, 'tile');
+  b.slabHoles(X0, Z0, X1, Z1, CTOP, CEIL_T, 'concrete', TUNNEL_HOLES);
+  const WY = Y - 0.15;
+  b.ext(X0 - T, WY, Z0, X0, CTOP, Z1, 'tile');
+  b.ext(X0, WY, Z0 - T, X1, CTOP, Z0, 'tile');
+  b.ext(X0, WY, Z1, X1, CTOP, Z1 + T, 'tile');
   // East wall, opened where the branch to Transit Hall leaves.
-  b.ext(X1, Y, Z0, X1 + T, CTOP, -43.2, 'tile');
-  b.ext(X1, Y, -32.4, X1 + T, CTOP, Z1, 'tile');
+  b.ext(X1, WY, Z0, X1 + T, CTOP, -43.2, 'tile');
+  b.ext(X1, WY, -32.4, X1 + T, CTOP, Z1, 'tile');
 
   // Branch under the alley, out to the exchange.
   const BX1 = 27, BZ0 = -43.2, BZ1 = -32.4;
   b.slab(X1, BZ0, BX1, BZ1, Y, 0.7, 'concrete');
-  b.slabHoles(X1, BZ0, BX1, BZ1, CTOP, 0.7, 'concrete', GROUND_HOLES);
-  b.ext(X1, Y, BZ0 - T, BX1, CTOP, BZ0, 'tile');
-  b.ext(X1, Y, BZ1, BX1, CTOP, BZ1 + T, 'tile');
-  b.ext(BX1, Y, BZ0, BX1 + T, CTOP, BZ1, 'tile');
+  b.slabHoles(X1, BZ0, BX1, BZ1, CTOP, CEIL_T, 'concrete', TUNNEL_HOLES);
+  b.ext(X1 + T, WY, BZ0 - T, BX1, CTOP, BZ0, 'tile');
+  b.ext(X1 + T, WY, BZ1, BX1, CTOP, BZ1 + T, 'tile');
+  b.ext(BX1, WY, BZ0 - T, BX1 + T, CTOP, BZ1 + T, 'tile');
 
   // Columns down the concourse — the only cover down here, so they are
   // spaced to be used rather than admired.
@@ -923,7 +946,7 @@ function metro(b) {
     const steps = 22;
     const zStart = dir < 0 ? hole[3] : hole[1];
     b.stairs((hole[0] + hole[2]) / 2, Y, zStart, dir < 0 ? 0 : Math.PI,
-      steps, Math.abs(Y) / steps, 0.32, 3.4, mat);
+      steps, Math.abs(Y) / steps, 0.32, hole[2] - hole[0], mat);
     const TOPH = 1.1;
     b.ext(hole[0] - 0.9, Y, hole[1], hole[0] + 0.03, 0, hole[3], mat);
     b.ext(hole[2] - 0.03, Y, hole[1], hole[2] + 0.9, 0, hole[3], mat);

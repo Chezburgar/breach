@@ -33,6 +33,18 @@ const STAIR_MANOR = [-5.7, -6.0, -2.3, 1.04];   // inside the great hall
 const STAIR_GROTTO = [12.3, 33.0, 15.7, 40.04]; // out in the gardens
 const GROUND_HOLES = [STAIR_MANOR, STAIR_GROTTO];
 
+/**
+ * The same openings, cut a little wider for each layer that has to clear them.
+ *
+ * The surface patches sit a centimetre apart and the dirt runs under all of
+ * them, so cutting every one to the same rectangle puts their vertical cut
+ * faces on a single plane — a ring of flickering round the head of each cellar
+ * stair, right where a player stands to look down it. The shaft lining
+ * oversails the opening by ninety centimetres, so none of these edges is ever
+ * seen.
+ */
+const widen = (by) => GROUND_HOLES.map((h) => [h[0] - by, h[1] - by, h[2] + by, h[3] + by]);
+
 export function buildEstate() {
   const b = new MapBuilder({
     id: 'estate',
@@ -79,7 +91,7 @@ export function buildEstate() {
 
 // ---------------------------------------------------------------- ground
 function ground(b) {
-  b.slabHoles(-94, -94, 94, 94, -0.35, 0.7, 'dirt', GROUND_HOLES);
+  b.slabHoles(-94, -94, 94, 94, -0.35, 0.7, 'dirt', widen(0.30));
 
   // Overlapping surfaces are layered so no two are coplanar. A hair of
   // separation is not enough: over a 190 m map the depth buffer cannot
@@ -97,8 +109,9 @@ function ground(b) {
       }
     }
     placed.push({ x0, z0, x1, z1, level });
-    return b.slabHoles(x0 - 0.04, z0 - 0.04, x1 + 0.04, z1 + 0.04,
-      level * PATCH_STEP, 0.65, m, GROUND_HOLES);
+    const over = 0.04 + level * 0.011;
+    return b.slabHoles(x0 - over, z0 - over, x1 + over, z1 + over,
+      level * PATCH_STEP, 0.65, m, widen(0.05 + level * 0.04));
   };
 
   patch(-94, -94, 94, 94, 'grass');
@@ -268,7 +281,7 @@ function manor(b) {
   const westWell = [-32.8, -20.2, -25.4, -12.8];
   const eastWell = [25.4, 11.8, 32.8, 19.2];
 
-  b.slabHoles(MX0, MZ0, MX1, MZ1, F0, 0.6, 'marble', [STAIR_MANOR]);
+  b.slabHoles(MX0, MZ0, MX1, MZ1, F0, 0.6, 'marble', widen(0.24));
   b.slabHoles(MX0, MZ0, MX1, MZ1, F1, 0.5, 'wood', [hallHole, westWell, eastWell]);
   b.slabHoles(MX0, MZ0, MX1, MZ1, F2, 0.5, 'wood', [westWell, eastWell]);
   roof(b, MX0, MZ0, MX1, MZ1, ROOF, 0.55, 'slate', [westWell, eastWell]);
@@ -344,8 +357,11 @@ function manor(b) {
   b.slab(-7.4, 2.6, 7.4, 4.52, F1 / 2 + 0.015, 0.415, 'marble');
   // The returns leave the landing and climb back the way you came, either
   // side of the main flight, arriving on the gallery at z 8.6.
-  b.stairs(-5.6, F1 / 2, 4.52, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
-  b.stairs(5.6, F1 / 2, 4.52, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
+  // Started a centimetre and a half low so the top tread stops just under the
+  // gallery rather than level with it — two surfaces on one plane at the head
+  // of the stairs is a flicker you walk into every round.
+  b.stairs(-5.6, F1 / 2 - 0.015, 4.52, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
+  b.stairs(5.6, F1 / 2 - 0.015, 4.52, Math.PI, 12, F1 / 2 / 12, 0.34, 3.4, 'marble');
   b.railing(-7.4, 2.6, -7.4, 4.52, F1 / 2, 'wood');
   b.railing(7.4, 2.6, 7.4, 4.52, F1 / 2, 'wood');
   b.railing(-7.4, 2.6, 7.4, 2.6, F1 / 2, 'wood');
@@ -373,9 +389,10 @@ function manor(b) {
   // across the bottom flight walls the stairs off completely.
   // Nothing between z -20 and -13: that is the service stairwell, and a
   // 2.3 m bookcase laid across the bottom flight walls the stairs off.
+  // The bookcase is the box. A shelf prop at the same centre sat entirely
+  // inside it — invisible, and geometry paid for twice.
   for (const z of [-23, -9, -3, 3, 10]) {
     b.box([MX0 + 5, 1.15, z], [7.0, 2.3, 0.55], 'woodDark');
-    b.prop('shelf', MX0 + 5, 0, z, { yaw: 0 });
   }
   b.box([MX0 + 5, 0.4, 18], [3.0, 0.8, 1.4], 'woodDark');
 
@@ -678,7 +695,7 @@ function cellar(b) {
   // A vaulted run from under the manor out to a garden grotto.
   const X0 = -14, X1 = 18, Z0 = -8, Z1 = 42;
   b.slab(X0, Z0, X1, Z1, Y, 0.7, 'stone');
-  b.slabHoles(X0, Z0, X1, Z1, CTOP, 0.7, 'stone', GROUND_HOLES);
+  b.slabHoles(X0, Z0, X1, Z1, CTOP, 0.7, 'stone', widen(0.42));
   b.ext(X0 - 0.8, Y, Z0, X0, CTOP, Z1, 'stone');
   b.ext(X1, Y, Z0, X1 + 0.8, CTOP, Z1, 'stone');
   b.ext(X0, Y, Z0 - 0.8, X1, CTOP, Z0, 'stone');
@@ -692,8 +709,10 @@ function cellar(b) {
   // Wine racks.
   for (let i = 0; i < 6; i++) {
     const z = Z0 + 8 + i * 5.5;
-    b.box([-2, Y + 1.0, z], [0.6, 2.0, 3.2], 'woodDark');
-    b.box([6, Y + 1.0, z], [0.6, 2.0, 3.2], 'woodDark');
+    // Clear of the stair shaft lining: at x -2 the west run stood half
+    // buried in it.
+    b.box([-0.4, Y + 1.0, z], [0.6, 2.0, 3.2], 'woodDark');
+    b.box([7.4, Y + 1.0, z], [0.6, 2.0, 3.2], 'woodDark');
   }
 
   // Stair shafts up into the great hall and the garden grotto.

@@ -14,6 +14,8 @@ import { DRONE } from '../shared/drone.js';
 import { buildNavGraph } from '../shared/sim/nav.js';
 import { MATCH } from '../shared/constants.js';
 import { readFileSync, existsSync } from 'node:fs';
+import { propParts } from '../public/src/engine/props.js';
+import { hashString } from '../shared/mathx.js';
 
 let failures = 0;
 const ok = (cond, label, detail = '') => {
@@ -65,16 +67,35 @@ function checkStairs(md, world) {
  * Pairs of boxes whose faces land on the same plane where a player can see
  * them. The depth buffer cannot choose between two surfaces it cannot tell
  * apart, so the pair flickers as the camera moves — the "flashing floors and
- * windows" class of bug. Faces buried below the ground or inside a floor slab
- * are skipped: they never render, so they never flicker.
+ * windows" class of bug.
+ *
+ * Faces inside a floor slab are skipped, since they never render. Faces
+ * *below* ground used not to be checked at all, on the same reasoning — which
+ * was wrong the moment a map put a metro concourse down there. Seven hundred
+ * square metres of ceiling flickered under the city and this test said the map
+ * was clean.
  *
  * Only reports patches big enough to notice; hairline seams between abutting
  * trim are not worth chasing.
  */
 const MIN_VISIBLE_AREA = 1.0;   // m²
 
+/**
+ * A quarter turn leaves a box axis-aligned — only its description rotated —
+ * so it can be normalised and tested like any other. Every wall running along
+ * X is built that way, which means they were all invisible to this test until
+ * now. Anything turned to some other angle is genuinely unaligned and rarely
+ * lands on another surface's plane, so it is left out.
+ */
+function squared(b) {
+  const r = ((b.r || 0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+  const q = Math.round(r / (Math.PI / 2));
+  if (Math.abs(r - q * (Math.PI / 2)) > 1e-6) return null;
+  return q % 2 === 1 ? { m: b.m, p: b.p, s: [b.s[2], b.s[1], b.s[0]] } : b;
+}
+
 function coincidentFaces(md) {
-  const boxes = md.boxes.filter((b) => !b.r);   // yaw-free; rotated boxes rarely align
+  const boxes = md.boxes.map(squared).filter(Boolean);
   const lo = (b, a) => b.p[a] - b.s[a] / 2;
   const hi = (b, a) => b.p[a] + b.s[a] / 2;
   const name = (b) => `${b.m} [${b.s.map((v) => v.toFixed(1)).join('x')}]`;
@@ -101,17 +122,88 @@ function coincidentFaces(md) {
         const [p, q] = [0, 1, 2].filter((k) => k !== a);
         const area = ov[p] * ov[q];
         if (area < MIN_VISIBLE_AREA) continue;
-        if (Math.min(hi(A, 1), hi(B, 1)) < 0.02) continue;      // underground
+        // (nothing skipped for being underground: maps have rooms there)
 
         for (const face of [[hi(A, a), hi(B, a)], [lo(A, a), lo(B, a)]]) {
           if (Math.abs(face[0] - face[1]) >= 0.004) continue;
-          if (a === 1 && face[0] < 0.12) continue;              // inside a floor slab
+          if (a === 1 && face[0] < 0.12 && face[0] > -0.5) continue;   // inside a floor slab
           hits.push({ axis: 'xyz'[a], plane: face[0], area, a: name(A), b: name(B) });
         }
       }
     }
   }
   return hits.sort((x, y) => y.area - x.area);
+}
+
+/**
+ * A conservative sphere round each primitive of a prop, transformed the way
+ * the world builder transforms it. Exact enough to catch a tree growing
+ * through a floor, which is what it is for.
+ */
+function propSpheres(prop) {
+  const parts = propParts(prop, hashString(`${prop.type}:${prop.p.join(',')}`));
+  if (!parts) return [];
+  const scale = prop.scale || 1;
+  const cos = Math.cos(prop.yaw || 0), sin = Math.sin(prop.yaw || 0);
+  return parts.map((part) => {
+    let r;
+    if (part.k === 'box') r = Math.hypot(part.s[0], part.s[1], part.s[2]) / 2;
+    else if (part.k === 'cyl') r = Math.hypot(Math.max(part.s[0], part.s[1]), part.s[2] / 2);
+    else if (part.k === 'cone') r = Math.hypot(part.s[0], part.s[1] / 2);
+    else r = part.s;
+    const lx = part.p[0] * scale, ly = part.p[1] * scale, lz = part.p[2] * scale;
+    return {
+      x: prop.p[0] + lx * cos + lz * sin,
+      y: prop.p[1] + ly,
+      z: prop.p[2] - lx * sin + lz * cos,
+      r: r * scale,
+    };
+  });
+}
+
+/** How far a sphere reaches inside a yaw-rotated box. Zero if it is outside. */
+function spherePenetration(s, b) {
+  const cos = Math.cos(b.r || 0), sin = Math.sin(b.r || 0);
+  const dx = s.x - b.p[0], dz = s.z - b.p[2];
+  const lx = dx * cos + dz * sin;
+  const lz = -dx * sin + dz * cos;
+  const ly = s.y - b.p[1];
+  const cl = (v, h) => (v < -h ? -h : v > h ? h : v);
+  const nx = lx - cl(lx, b.s[0] / 2);
+  const ny = ly - cl(ly, b.s[1] / 2);
+  const nz = lz - cl(lz, b.s[2] / 2);
+  return Math.max(0, s.r - Math.hypot(nx, ny, nz));
+}
+
+/**
+ * Props growing through the building they stand in.
+ *
+ * A tree is authored as a position and a scale, and neither says anything
+ * about the room around it — so a canopy sized for a courtyard goes straight
+ * through the gallery deck when the same call is made indoors. Whatever the
+ * prop is standing on is not a fault, so anything within half a metre of its
+ * base, and anything whose top face is below it, is ignored.
+ */
+function propsInGeometry(md) {
+  const solids = md.boxes.filter((b) => b.solid !== false && b.m !== 'bark' && b.m !== 'foliage');
+  const bad = [];
+  for (const prop of md.props) {
+    const base = prop.p[1];
+    let worst = 0, where = null;
+    for (const s of propSpheres(prop)) {
+      if (s.y - s.r < base + 0.5) continue;
+      for (const b of solids) {
+        if (b.p[1] + b.s[1] / 2 < base + 0.6) continue;
+        const pen = spherePenetration(s, b);
+        if (pen > worst) { worst = pen; where = b; }
+      }
+    }
+    if (worst > 0.3) {
+      bad.push(`${prop.type} at (${prop.p.map((v) => v.toFixed(0)).join(', ')}) `
+        + `reaches ${worst.toFixed(2)}m into ${where.m}`);
+    }
+  }
+  return bad;
 }
 
 // ---------------------------------------------------------------- geometry
@@ -201,6 +293,10 @@ function checkMaps() {
     ok(stairFaults.length === 0, `${id}: every flight of stairs is climbable`,
       `${stairFaults.length}/${(md.flights || []).length * 2} runs failed:\n        `
         + stairFaults.join('\n        '));
+
+    const inside = propsInGeometry(md);
+    ok(inside.length === 0, `${id}: no prop grows through the building it stands in`,
+      `${inside.length}:\n        ` + inside.slice(0, 6).join(`\n        `));
 
     const zf = coincidentFaces(md);
     ok(zf.length === 0, `${id}: no surfaces fighting for the same plane`,
