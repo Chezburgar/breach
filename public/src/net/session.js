@@ -77,6 +77,7 @@ export class Session {
     this.lobbyOpenedAt = 0;
     this.lobbyTimer = null;
     this.pendingMode = DEFAULT_MODE;
+    this.pendingMap = DEFAULT_MAP;
     this.pendingBots = 0;
 
     // Guest state.
@@ -234,6 +235,10 @@ export class Session {
     // Decided before anything opens: the slot names are per mode, and the
     // room the host builds is shaped by it.
     this.pendingMode = MODES[mode] ? mode : DEFAULT_MODE;
+    // Quick play rotates the maps. Whoever ends up hosting picked theirs
+    // before anyone joined, so this is as close to a rotation as a lobby
+    // that builds itself out of the first player to arrive can get.
+    this.pendingMap = COMBAT_MAPS[Math.floor(Math.random() * COMBAT_MAPS.length)];
     this.setStatus('connecting', 'contacting relay');
     await this.open();
 
@@ -489,7 +494,7 @@ export class Session {
     this.room = new GameRoom(hub, {
       id: code,
       mode: this.pendingMode,
-      mapId: DEFAULT_MAP,
+      mapId: this.pendingMap,
       isPrivate,
       botCount: 0,
     });
@@ -658,8 +663,12 @@ export class Session {
   hostLobbyCommand(msg) {
     if (msg.t === 'group.config') {
       if (MODES[msg.mode]) this.pendingMode = msg.mode;
+      if (COMBAT_MAPS.includes(msg.map)) this.pendingMap = msg.map;
       if (Number.isFinite(msg.bots)) this.pendingBots = Math.max(0, Math.min(9, msg.bots | 0));
-      if (this.room && this.room.phase === 'lobby') this.room.mode = getMode(this.pendingMode);
+      if (this.room && this.room.phase === 'lobby') {
+        this.room.mode = getMode(this.pendingMode);
+        this.room.setMap(this.pendingMap);
+      }
       this.pushLobby();
     } else if (msg.t === 'group.start') {
       this.startMatch(this.pendingBots);
@@ -686,7 +695,7 @@ export class Session {
           code: this.code,
           leaderId: this.localClient.id,
           mode: this.pendingMode,
-          map: DEFAULT_MAP,
+          map: this.pendingMap,
           bots: this.pendingBots,
           members,
         },
@@ -765,7 +774,7 @@ export class Session {
     this.room = new GameRoom(hub, {
       id: this.code,
       mode: this.pendingMode,
-      mapId: DEFAULT_MAP,
+      mapId: this.pendingMap,
       isPrivate: this.isPrivateLobby,
       botCount: 0,
     });

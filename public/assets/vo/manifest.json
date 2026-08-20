@@ -6,7 +6,8 @@
       "slot": "intro",
       "seconds": 11.15,
       "order": 1,
-      "text": "intro 1"
+      "text": "intro 1",
+      "map": "estate"
     },
     {
       "id": "intro_2",
@@ -14,7 +15,8 @@
       "slot": "intro",
       "seconds": 6.35,
       "order": 2,
-      "text": "intro 2"
+      "text": "intro 2",
+      "map": "estate"
     },
     {
       "id": "intro_3",
@@ -22,7 +24,26 @@
       "slot": "intro",
       "seconds": 6.92,
       "order": 3,
-      "text": "intro 3"
+      "text": "intro 3",
+      "map": "estate"
+    },
+    {
+      "id": "intro_skyline_1",
+      "file": "intro_skyline_1.mp3",
+      "slot": "intro",
+      "seconds": 6.27,
+      "order": 1,
+      "map": "skyline",
+      "text": "skyline intro 1"
+    },
+    {
+      "id": "intro_skyline_2",
+      "file": "intro_skyline_2.mp3",
+      "slot": "intro",
+      "seconds": 9.56,
+      "order": 2,
+      "map": "skyline",
+      "text": "skyline intro 2"
     },
     {
       "id": "elim_vanguard_1",

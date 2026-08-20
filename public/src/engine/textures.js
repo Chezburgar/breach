@@ -481,6 +481,90 @@ const PAINTERS = {
     }
   },
 
+  /**
+   * Curtain wall — the glazed skin of a tower.
+   *
+   * The thing that sells glass at a distance is not the glass, it is that no
+   * two panes are the same: some hold the sky, some are tinted almost black,
+   * and some have blinds pulled down behind them. A uniform sheet reads as
+   * painted concrete however shiny it is, so each pane draws one of those
+   * three states from a hash of its position. Mullions are recessed and much
+   * rougher, which is what gives the grid its shadow line.
+   */
+  curtainwall(ctx) {
+    const { S, p, rgb, height, rough, metal } = ctx;
+    const cols = 2, rows = 2;         // panes per tile — one storey per row
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        const fx = (x / S) * cols, fy = (y / S) * rows;
+        const col = Math.floor(fx), row = Math.floor(fy);
+        const inX = fx - col, inY = fy - row;
+        const mullion = inX < 0.055 || inX > 0.945 || inY < 0.075 || inY > 0.925;
+
+        const u = (x / S) * p, v = (y / S) * p;
+        const n = fbm(u * 3, v * 3, p, 53, 3);
+
+        if (mullion) {
+          const g = 96 + n * 22;
+          rgb[i * 3] = g * 0.98; rgb[i * 3 + 1] = g; rgb[i * 3 + 2] = g * 1.04;
+          height[i] = -0.75;
+          rough[i] = 0.44;
+          metal[i] = 0.55;
+          continue;
+        }
+
+        const state = hash2(col, row, 97);
+        const blinds = state > 0.78;
+        const bright = state < 0.30;
+        // Panes are not flat: a hair of curvature per pane is what makes a
+        // facade shimmer as you walk past it instead of looking printed on.
+        const bow = Math.sin(inX * Math.PI) * Math.sin(inY * Math.PI);
+
+        if (blinds) {
+          const slat = Math.abs(((inY * 14) % 1) - 0.5) > 0.28 ? 1 : 0;
+          const g = mix(96, 148, slat) + n * 12;
+          rgb[i * 3] = g * 1.04; rgb[i * 3 + 1] = g * 1.0; rgb[i * 3 + 2] = g * 0.9;
+          height[i] = bow * 0.2 - slat * 0.05;
+          rough[i] = 0.62;
+          metal[i] = 0.12;
+        } else {
+          const t = bright ? 1 : 0.42;
+          rgb[i * 3] = mix(26, 78, t) + n * 9;
+          rgb[i * 3 + 1] = mix(38, 104, t) + n * 10;
+          rgb[i * 3 + 2] = mix(52, 126, t) + n * 12;
+          height[i] = bow * 0.28;
+          rough[i] = bright ? 0.05 : 0.09;
+          metal[i] = 0.86;
+        }
+      }
+    }
+  },
+
+  /** Precast concrete cladding: big pale panels with recessed joints. */
+  precast(ctx) {
+    const { S, p, rgb, height, rough, metal } = ctx;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const i = y * S + x;
+        const fx = (x / S) * 2, fy = (y / S) * 2;
+        const joint = Math.abs((fx % 1) - 0.5) > 0.472 || Math.abs((fy % 1) - 0.5) > 0.472;
+
+        const u = (x / S) * p, v = (y / S) * p;
+        const n = fbm(u * 2.2, v * 2.2, p, 67, 5);
+        const grit = noise(u * 34, v * 34, p * 34, 71) > 0.88 ? 1 : 0;
+        // Weathering runs down from the joints, which is where the dirt sits.
+        const streak = clamp01(turbulence(u * 0.7, v * 3.4, p, 83, 3) - 0.42) * 0.5;
+
+        const g = (168 + n * 26 - grit * 18) * (joint ? 0.72 : 1) * (1 - streak);
+        rgb[i * 3] = g; rgb[i * 3 + 1] = g * 0.99; rgb[i * 3 + 2] = g * 0.96;
+        height[i] = joint ? -0.7 : n * 0.4 + grit * 0.2;
+        rough[i] = clamp01(0.74 + n * 0.16 + streak * 0.2);
+        metal[i] = 0;
+      }
+    }
+  },
+
   estatewood(ctx) {
     const { S, p, rgb, height, rough, metal } = ctx;
     const boards = 9;
@@ -740,6 +824,8 @@ const MATERIAL_SETUP = {
   trim:       { scale: 1.8, relief: 3 },
   gravel:     { scale: 2.2, relief: 6 },
   estatebrick:{ scale: 2.6, relief: 9 },
+  curtainwall:{ scale: 3.2, relief: 4 },
+  precast:    { scale: 3.4, relief: 5 },
   estatewood: { scale: 2.2, relief: 6 },
   slate:      { scale: 2.4, relief: 7 },
   hay:        { scale: 1.4, relief: 7 },
@@ -775,6 +861,12 @@ const SPECIALS = {
   waterjet: () => new THREE.MeshPhysicalMaterial({
     color: 0xd8eef5, roughness: 0.08, transmission: 0.75,
     transparent: true, opacity: 0.45, depthWrite: false,
+  }),
+  neon: () => new THREE.MeshStandardMaterial({
+    color: 0xffb27a, emissive: 0xff7a3a, emissiveIntensity: 3.4, roughness: 0.4,
+  }),
+  windowglow: () => new THREE.MeshStandardMaterial({
+    color: 0xffe6bd, emissive: 0xffcf92, emissiveIntensity: 1.5, roughness: 0.5,
   }),
   lampglass: () => new THREE.MeshStandardMaterial({
     color: 0xfff2d8, emissive: 0xffd9a0, emissiveIntensity: 2.6, roughness: 0.28,

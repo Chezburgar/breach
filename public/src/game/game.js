@@ -297,6 +297,9 @@ export class Game {
     this.local.setLoadout({
       primary: { ...this.profile.loadout.primary },
       secondary: { ...this.profile.loadout.secondary },
+      // Without this the prediction state falls back to the default ability
+      // and a vault is predicted as a dash — the two disagree by ten metres.
+      ability: this.profile.loadout.ability,
     });
     this.equipViewmodel();
 
@@ -313,8 +316,7 @@ export class Game {
     this.introCam.begin(this.mapData, msg.intro || MATCH.introDuration);
       this.phaseRemaining = msg.intro;
       this.hud.showIntro({ ...this.match, players: msg.players }, this.net.id);
-      this.commentator.setEnabled(this.profile.settings.commentary !== false);
-      this.commentator.callIntro();
+      this.commentator.callIntro(msg.map);
       this.audio.startIntroBed();
       this.introAngle = 0;
     } else {
@@ -645,6 +647,7 @@ export class Game {
     this.local.setLoadout({
       primary: { ...this.profile.loadout.primary },
       secondary: { ...this.profile.loadout.secondary },
+      ability: this.profile.loadout.ability,
     });
     const start = this.mapData.spawns.find((s) => s.tags?.includes('start')) || this.mapData.spawns[0];
     this.local.spawn(start.p, start.yaw);
@@ -869,6 +872,10 @@ export class Game {
   // ---------------------------------------------------------------- frame
   update(dt) {
     if (!this.inMatch || !this.local) return;
+
+    // Silences the booth the instant the setting is switched off, including
+    // from the settings dialog over a live match.
+    this.commentator.sync();
 
     this.handleActions();
     // Before anything else touches the mouse: while the feed is up the look

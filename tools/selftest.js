@@ -3,7 +3,7 @@
 // Builds every map, validates the geometry a player can actually touch, then
 // simulates full matches of every mode with bots to shake out server bugs.
 
-import { getMap, MAP_IDS } from '../shared/maps/index.js';
+import { getMap, MAP_IDS, COMBAT_MAPS, MAP_INFO } from '../shared/maps/index.js';
 import { buildWorld, cylinderBlocked, raycastWorld } from '../shared/collision.js';
 import { createPlayerState, stepPlayer } from '../shared/controller.js';
 import { FIXED_DT, PLAYER, BTN, MOVE } from '../shared/constants.js';
@@ -12,6 +12,8 @@ import { WEAPON_LIST, resolveWeapon, recoilAt, currentSpread } from '../shared/w
 import { GameRoom } from '../shared/sim/room.js';
 import { DRONE } from '../shared/drone.js';
 import { buildNavGraph } from '../shared/sim/nav.js';
+import { MATCH } from '../shared/constants.js';
+import { readFileSync, existsSync } from 'node:fs';
 
 let failures = 0;
 const ok = (cond, label, detail = '') => {
@@ -237,10 +239,10 @@ class FakeHub {
   destroyRoom(room) { this.destroyed.push(room.id); room.dispose(); }
 }
 
-function simulateMatch(modeId, seconds = 90) {
+function simulateMatch(modeId, seconds = 90, mapId = 'estate') {
   const hub = new FakeHub();
   const room = new GameRoom(hub, {
-    id: `test_${modeId}`, mode: modeId, mapId: 'estate', isPrivate: true, botCount: 8,
+    id: `test_${modeId}_${mapId}`, mode: modeId, mapId, isPrivate: true, botCount: 8,
   });
 
   const events = {
@@ -308,22 +310,56 @@ function simulateMatch(modeId, seconds = 90) {
   return { events, embedded, wall, seconds };
 }
 
+function checkCommentary() {
+  console.log('');
+  console.log('COMMENTARY');
+  const manifest = JSON.parse(readFileSync('public/assets/vo/manifest.json', 'utf8'));
+  const clips = manifest.clips || [];
+  let missing = 0;
+  for (const c of clips) {
+    if (!existsSync(`public/assets/vo/${c.file}`)) { missing++; console.log(`        missing ${c.file}`); }
+  }
+  ok(missing === 0, `all ${clips.length} clips are on disk`, `${missing} missing`);
+
+  // A map whose opening lines run past the fly-through gets cut off mid
+  // sentence, which is exactly what the pre-recorded booth was meant to fix.
+  const GAP = 0.18;
+  for (const id of COMBAT_MAPS) {
+    const md = getMap(id);
+    const window = md.introDuration ?? MATCH.introDuration;
+    const lines = clips.filter((c) => c.slot === 'intro' && (c.map == null || c.map === id));
+    const spoken = lines.reduce((a, c) => a + (c.seconds || 0), 0) + Math.max(0, lines.length - 1) * GAP;
+    ok(lines.length > 0, `${id}: has an opening`, 'no intro clips');
+    ok(spoken <= window, `${id}: the opening fits the fly-through`,
+      `${spoken.toFixed(1)}s of lines in a ${window.toFixed(1)}s window`);
+    const orders = lines.map((c) => c.order || 0);
+    ok(new Set(orders).size === orders.length, `${id}: the opening lines are ordered`,
+      `orders ${JSON.stringify(orders)}`);
+    console.log(`        ${MAP_INFO[id].name}: ${lines.length} lines, ${spoken.toFixed(1)}s of ${window.toFixed(1)}s`);
+  }
+}
+
 function checkMatches() {
   const SECONDS = 180;
   console.log(`\nMATCH SIMULATION (8 bots, ${SECONDS}s of game time each)`);
-  for (const modeId of MODE_IDS) {
-    const r = simulateMatch(modeId, SECONDS);
-    ok(r.events.errors.length === 0, `${modeId}: no exceptions`,
+  // Every combat map is played, not just the first one: a map bots cannot
+  // fight on is a map where rounds never end.
+  const runs = [];
+  for (const modeId of MODE_IDS) for (const mapId of COMBAT_MAPS) runs.push([modeId, mapId]);
+  for (const [modeId, mapId] of runs) {
+    const r = simulateMatch(modeId, SECONDS, mapId);
+    const label = `${modeId} on ${mapId}`;
+    ok(r.events.errors.length === 0, `${label}: no exceptions`,
       r.events.errors[0] ? r.events.errors[0].stack?.split('\n')[0] : '');
     // One in the Chamber gives each player a single round, so shot volume is
     // an order of magnitude lower by design.
     const minShots = MODES[modeId].oneShot ? 8 : 40;
-    ok(r.events.shots >= minShots, `${modeId}: bots engaged`, `${r.events.shots} shots`);
-    ok(r.events.kills > 0, `${modeId}: eliminations registered`, `${r.events.kills} kills`);
-    ok(r.embedded === 0, `${modeId}: no player stuck in geometry`, `${r.embedded} embedded`);
+    ok(r.events.shots >= minShots, `${label}: bots engaged`, `${r.events.shots} shots`);
+    ok(r.events.kills > 0, `${label}: eliminations registered`, `${r.events.kills} kills`);
+    ok(r.embedded === 0, `${label}: no player stuck in geometry`, `${r.embedded} embedded`);
 
-    ok(r.events.rounds > 0, `${modeId}: rounds resolved`, `${r.events.rounds} rounds`);
-    ok(r.events.grenades > 0, `${modeId}: grenades thrown and detonated`, `${r.events.grenades} pops`);
+    ok(r.events.rounds > 0, `${label}: rounds resolved`, `${r.events.rounds} rounds`);
+    ok(r.events.grenades > 0, `${label}: grenades thrown and detonated`, `${r.events.grenades} pops`);
 
     const e = r.events.ended;
     const boardOk = e && Array.isArray(e.board) && e.board.length === 8 &&
@@ -331,9 +367,9 @@ function checkMatches() {
     const winnerOk = e && (e.result === 'draw' ||
       (e.result === 'team' ? e.winnerTeam != null : !!e.winner)) &&
       (e.result === 'draw' || (!!e.winnerBanner && !!e.fanfare));
-    ok(boardOk, `${modeId}: end-of-match scoreboard is complete`,
+    ok(boardOk, `${label}: end-of-match scoreboard is complete`,
       e ? `board ${e.board?.length}` : 'no match.end');
-    ok(winnerOk, `${modeId}: winner has a banner and a fanfare`,
+    ok(winnerOk, `${label}: winner has a banner and a fanfare`,
       e ? `result=${e.result} banner=${e.winnerBanner} fanfare=${e.fanfare}` : 'no match.end');
 
     const rt = (r.wall / (r.seconds * 1000)) * 100;
@@ -431,6 +467,7 @@ function checkDrone() {
 }
 checkMaps();
 checkWeapons();
+checkCommentary();
 checkMatches();
 checkDrone();
 

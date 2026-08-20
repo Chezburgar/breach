@@ -18,7 +18,7 @@ import {
 } from '../grenades.js';
 import { clamp, dirFromAngles, hashString, makeRng, vdist, vnorm, vsub } from '../mathx.js';
 import { DRONE, createDrone, stepDrone, droneEye, scanTarget } from '../drone.js';
-import { buildNavGraph } from './nav.js';
+import { navGraphBuilder } from './nav.js';
 import { Bot, BOT_NAMES } from './bots.js';
 
 // Monotonic seconds. performance.now() exists in both Node and the browser,
@@ -61,7 +61,11 @@ export class GameRoom {
     this.mapId = mapId || 'estate';
     this.mapData = getMap(this.mapId);
     this.world = buildWorld(this.mapData);
-    this.nav = buildNavGraph(this.world, this.mapData);
+    // Built in slices while the pre-game runs — see navGraphBuilder. Reading the
+    // graph before it is ready finishes it on the spot, so a bot can
+    // never path against half a graph.
+    this.navBuild = navGraphBuilder(this.world, this.mapData);
+    this.navGraph = this.navBuild.done ? this.navBuild.graph : null;
     this.isPrivate = !!isPrivate;
     this.botCount = botCount || 0;
     this.seed = (Math.random() * 0xffffffff) >>> 0;
@@ -93,11 +97,16 @@ export class GameRoom {
     this.droneSeq = 0;
   }
 
+  /** How long the pre-game runs: the map decides, since its lines do. */
+  get introDuration() {
+    return this.mapData.introDuration ?? MATCH.introDuration;
+  }
+
   // ------------------------------------------------------------ lifecycle
   begin() {
     this.fillBots();
     this.phase = 'intro';
-    this.phaseEnds = MATCH.introDuration;
+    this.phaseEnds = this.introDuration;
     this.assignSpawns();
 
     const roster = this.roster();
@@ -111,7 +120,7 @@ export class GameRoom {
       roundsToWin: this.mode.roundsToWin,
       maxRounds: this.mode.maxRounds,
       roundTime: this.mode.roundTime,
-      intro: MATCH.introDuration,
+      intro: this.introDuration,
       players: roster,
     });
     this.pushPhase();
@@ -131,8 +140,36 @@ export class GameRoom {
     this.players.clear();
   }
 
+  /**
+   * Change map while the lobby is still open.
+   *
+   * The room is built when the lobby opens, which is before anyone has chosen
+   * where to play, so the choice has to be able to arrive afterwards. Refused
+   * once a match is under way: swapping the ground out from under live
+   * players is not a thing this needs to do.
+   */
+  setMap(mapId) {
+    if (!mapId || mapId === this.mapId || this.phase !== 'lobby') return false;
+    this.mapId = mapId;
+    this.mapData = getMap(mapId);
+    this.world = buildWorld(this.mapData);
+    this.navBuild = navGraphBuilder(this.world, this.mapData);
+    this.navGraph = this.navBuild.done ? this.navBuild.graph : null;
+    return true;
+  }
+
+  get nav() {
+    if (!this.navGraph) this.navGraph = this.navBuild.finish();
+    return this.navGraph;
+  }
+
   pump() {
     const t = now();
+    // Dead time in the pre-game is worth more to the navigation graph than to
+    // anything else, so it gets the larger slice until the match is live.
+    if (!this.navGraph && this.navBuild.advance(this.phase === 'live' ? 2 : 5)) {
+      this.navGraph = this.navBuild.graph;
+    }
     let dt = t - this.last;
     this.last = t;
     if (dt > 0.25) dt = 0.25;          // a stall must not fast-forward the match
@@ -1270,6 +1307,11 @@ export class GameRoom {
       loadout: {
         primary: { ...p.weapons.primary.cfg, mag: p.weapons.primary.mag, reserve: p.weapons.primary.reserve },
         secondary: { ...p.weapons.secondary.cfg, mag: p.weapons.secondary.mag, reserve: p.weapons.secondary.reserve },
+        // The ability travels with the spawn or the client predicts the
+        // wrong one. Leaving it out reset every respawn to the default: the
+        // HUD showed the vault, the server ran the vault, and the browser
+        // quietly predicted a dash.
+        ability: p.state.ability,
       },
       grenades: p.grenades,
     });

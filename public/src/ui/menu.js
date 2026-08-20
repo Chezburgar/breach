@@ -1,6 +1,7 @@
 // Front end: play menu, loadout editor, profile, settings, party and lobby.
 
 import { MODES, QUICKPLAY_MODES } from '/shared/modes.js';
+import { COMBAT_MAPS, MAP_INFO } from '/shared/maps/index.js';
 import {
   PRIMARIES, SECONDARIES, SCOPES, MUZZLES, GRIPS, LASERS,
   getWeapon, resolveWeapon, sanitizeLoadout,
@@ -485,12 +486,13 @@ export class Menu {
       grid.appendChild(row);
     };
 
-    const toggle = (label, key, onChange) => {
+    const toggle = (label, key, onChange, hint) => {
       const row = document.createElement('div');
       row.className = 'setting';
       row.innerHTML = `<label>${label}</label>
         <input type="range" min="0" max="1" step="1" value="${s[key] ? 1 : 0}">
-        <b>${s[key] ? 'ON' : 'OFF'}</b>`;
+        <b>${s[key] ? 'ON' : 'OFF'}</b>
+        ${hint ? `<div class="hint">${hint}</div>` : ''}`;
       const input = row.querySelector('input');
       const out = row.querySelector('b');
       input.addEventListener('input', () => {
@@ -518,7 +520,8 @@ export class Menu {
     slider('MUSIC VOLUME', 'musicVolume', 0, 1, 0.01, (v) => `${Math.round(v * 100)}`,
       (v) => this.audio?.setVolume('music', v));
     toggle('TEAMMATE NAMEPLATES', 'showNameplates');
-    toggle('PRE-GAME ANNOUNCER', 'commentary');
+    toggle('MATCH COMMENTARY', 'commentary', null,
+      'The booth: the opening call over the fly-through, eliminations, round results and the match win.');
   }
 
   // ----------------------------------------------------------------- lobby
@@ -578,6 +581,9 @@ export class Menu {
       cfg.innerHTML = `
         <h3>MODE</h3>
         <div class="chips" id="lobby-modes"></div>
+        <h3 style="margin-top:16px">MAP</h3>
+        <div class="chips" id="lobby-maps"></div>
+        <div class="hint" id="lobby-map-blurb"></div>
         <h3 style="margin-top:16px">BOTS</h3>
         <div class="setting" style="grid-template-columns:1fr 120px 40px">
           <label>FILL WITH</label>
@@ -597,6 +603,25 @@ export class Menu {
         }
         modes.appendChild(chip);
       }
+
+      // Which map, now that there is more than one of them. Everyone in the
+      // lobby sees the choice; only the leader can change it.
+      const maps = $('lobby-maps');
+      for (const id of COMBAT_MAPS) {
+        const info = MAP_INFO[id] || { name: id };
+        const chip = document.createElement('div');
+        chip.className = `chip ${group.map === id ? 'active' : ''}`;
+        chip.textContent = info.name;
+        if (isLeader) {
+          chip.addEventListener('click', () => {
+            this.click();
+            this.net.send({ t: 'group.config', map: id });
+          });
+        }
+        maps.appendChild(chip);
+      }
+      const picked = MAP_INFO[group.map];
+      $('lobby-map-blurb').textContent = picked ? `${picked.blurb} · ${picked.size}` : '';
       const range = cfg.querySelector('input');
       if (range && isLeader) {
         range.addEventListener('change', () => {

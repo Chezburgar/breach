@@ -17,16 +17,22 @@ export const ABILITIES = {
   dash: {
     id: 'dash', name: 'Dash', short: 'DASH', kind: 'move',
     blurb: 'A hard shove in the direction you are moving. Crosses an angle before anyone can track it.',
-    cooldown: 9,
+    cooldown: 5,
     speed: 15.5,          // impulse, m/s
     lift: 1.6,            // a little off the floor so it clears kerbs
   },
   vault: {
     id: 'vault', name: 'Vault', short: 'JUMP', kind: 'move',
-    blurb: 'A charged leap onto balconies and rooflines that have no stairs.',
+    blurb: 'A charged leap that clears three storeys. Rooflines, sky bridges, and the balcony nobody is watching.',
     cooldown: 11,
-    up: 12.2,
-    forward: 3.4,
+    // Apex is up^2 / 2g, so at 22.5 m/s^2 this is a shade under ten metres —
+    // what it takes to reach a mid-rise roof from the street.
+    up: 21.0,
+    forward: 4.0,
+    // A leap that high lands well past the fall-damage threshold, so it
+    // carries its own grace. Spent on the first landing, so it pays for the
+    // flight and nothing after it.
+    softLand: 6.0,
   },
   shield: {
     id: 'shield', name: 'Bulwark', short: 'SHLD', kind: 'world',
@@ -97,6 +103,7 @@ export function applyMoveAbility(s, def, wish) {
     // Only from the floor: an air-launch is a flight, not a leap.
     if (!s.onGround && s.coyote <= 0) return false;
     s.vel.y = def.up;
+    s.noFallUntil = s.time + (def.softLand || 0);
     s.vel.x += wish.fx * def.forward;
     s.vel.z += wish.fz * def.forward;
     s.onGround = false;

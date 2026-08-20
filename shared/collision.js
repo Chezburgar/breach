@@ -51,24 +51,50 @@ export function buildWorld(mapData) {
     }
   }
 
-  return { boxes, grid, cell: CELL, bounds: mapData.bounds, data: mapData };
+  return {
+    boxes, grid, cell: CELL, bounds: mapData.bounds, data: mapData,
+    // Scratch for the broadphase: one slot per box, stamped with the query
+    // number that last touched it.
+    stamp: new Int32Array(boxes.length), gen: 0,
+  };
 }
 
 const _scratch = [];
 
-/** Collect indices of solid boxes whose AABB overlaps the given XZ rectangle. */
+/**
+ * Collect indices of solid boxes whose AABB overlaps the given XZ rectangle.
+ *
+ * This is the hottest function in the project — a single simulated step calls
+ * it half a dozen times, and building a map's navigation graph runs millions
+ * of steps. De-duplicating with a fresh Set per call made it more than half
+ * the cost of that build, most of it allocation and the garbage collection
+ * behind it. A generation stamp does the same job with no allocation at all:
+ * bump a counter, and a box already in `out` is the one whose stamp matches.
+ */
 export function queryXZ(world, minx, minz, maxx, maxz, out = _scratch) {
   out.length = 0;
-  const x0 = Math.floor(minx / world.cell), x1 = Math.floor(maxx / world.cell);
-  const z0 = Math.floor(minz / world.cell), z1 = Math.floor(maxz / world.cell);
-  const seen = new Set();
+  const size = world.cell;
+  const x0 = Math.floor(minx / size), x1 = Math.floor(maxx / size);
+  const z0 = Math.floor(minz / size), z1 = Math.floor(maxz / size);
+
+  // The overwhelmingly common case: everything falls inside one cell, so
+  // nothing can be listed twice and the stamping is pure overhead.
+  if (x0 === x1 && z0 === z1) {
+    const cell = world.grid.get(x0 * 73856093 ^ z0 * 19349663);
+    if (cell) for (let k = 0; k < cell.length; k++) out.push(cell[k]);
+    return out;
+  }
+
+  const stamp = world.stamp;
+  const gen = ++world.gen;
   for (let x = x0; x <= x1; x++) {
     for (let z = z0; z <= z1; z++) {
       const cell = world.grid.get(x * 73856093 ^ z * 19349663);
       if (!cell) continue;
-      for (const i of cell) {
-        if (seen.has(i)) continue;
-        seen.add(i);
+      for (let k = 0; k < cell.length; k++) {
+        const i = cell[k];
+        if (stamp[i] === gen) continue;
+        stamp[i] = gen;
         out.push(i);
       }
     }

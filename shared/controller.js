@@ -36,6 +36,7 @@ export function createPlayerState(spawn, ability = null) {
     ability,             // id of the equipped ability
     abilityReadyAt: 0,
     abilityFired: 0,     // set for one frame when a movement ability goes off
+    noFallUntil: 0,      // a leap pays for its own landing until this time
     landImpact: 0,      // downward speed at the moment of landing (one frame)
     fallDamage: 0,      // damage owed from the last landing (one frame)
     wasOnGround: false,
@@ -284,7 +285,11 @@ export function stepPlayer(s, cmd, world, dt) {
     const g = groundUnder(world, s.pos.x, s.pos.z, R, prevFeet + 0.02, s.pos.y);
     if (g > -Infinity) {
       s.pos.y = g;
-      if (s.vel.y < -MOVE.fallDamageStart) {
+      // A vault throws you ten metres up, and the drop back down would hurt
+      // more than the ability is worth. The grace it sets covers exactly one
+      // landing — its own — and is spent here whether it was needed or not.
+      const graced = s.time < (s.noFallUntil || 0);
+      if (s.vel.y < -MOVE.fallDamageStart && !graced) {
         s.landImpact = -s.vel.y;
         s.fallDamage = Math.min(100, (s.landImpact - MOVE.fallDamageStart) * MOVE.fallDamagePerUnit);
       } else if (s.vel.y < -2) {
@@ -292,6 +297,7 @@ export function stepPlayer(s, cmd, world, dt) {
       }
       s.vel.y = 0;
       s.onGround = true;
+      s.noFallUntil = 0;
     }
   } else {
     const c = ceilingAbove(world, s.pos.x, s.pos.z, R, prevFeet + s.height, s.pos.y + s.height);

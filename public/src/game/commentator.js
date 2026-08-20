@@ -33,7 +33,6 @@ export class Commentator {
   constructor(settings, audio) {
     this.settings = settings || {};
     this.audio = audio || null;
-    this.enabled = true;
     this.clips = [];
     this.queue = [];
     this.current = null;
@@ -55,8 +54,22 @@ export class Commentator {
     }
   }
 
-  setEnabled(on) {
-    this.enabled = !!on;
+  /**
+   * Commentary is on unless the player has turned it off. Read live rather
+   * than cached: the settings panel is reachable mid-match, and a booth that
+   * only notices at the next match is a switch that does not work.
+   */
+  get enabled() { return this.settings.commentary !== false; }
+
+  /**
+   * Call once a frame. Catches the moment the setting is switched off and
+   * cuts whatever is talking; a line that keeps going after you silenced it
+   * reads as the switch being broken.
+   */
+  sync() {
+    const on = this.enabled;
+    if (on === this.wasEnabled) return;
+    this.wasEnabled = on;
     if (!on) this.reset();
   }
 
@@ -77,10 +90,17 @@ export class Commentator {
     return Math.max(0, Math.min(1, this.settings.masterVolume ?? 0.8));
   }
 
-  /** Clips for a slot, optionally for one team. */
-  pool(slot, team) {
+  /**
+   * Clips for a slot, optionally for one team and one map.
+   *
+   * A clip with no map suits any of them; one that names a map is only ever
+   * heard there, which is how the opening lines can say where the fight is
+   * without a separate booth per map.
+   */
+  pool(slot, team, map) {
     return this.clips.filter((c) => c.slot === slot
-      && (team == null || c.team == null || c.team === team));
+      && (team == null || c.team == null || c.team === team)
+      && (c.map == null || c.map === map));
   }
 
   /**
@@ -89,6 +109,7 @@ export class Commentator {
    *
    * @param opts.team    restrict to one side's clips
    * @param opts.maxSeconds only consider lines that fit
+   * @param opts.map     restrict to clips recorded for this map
    * @param opts.ordered play the pool in `order`, not at random
    */
   async say(slot, opts = {}) {
@@ -97,7 +118,7 @@ export class Commentator {
     const cfg = SLOTS[slot];
     if (!cfg) return;
 
-    let pool = this.pool(slot, opts.team);
+    let pool = this.pool(slot, opts.team, opts.map ?? this.map);
     if (opts.maxSeconds) pool = pool.filter((c) => !c.seconds || c.seconds <= opts.maxSeconds);
     if (!pool.length) return;
 
@@ -180,10 +201,11 @@ export class Commentator {
   }
 
   // ------------------------------------------------------------- moments
-  /** The three opening lines, in order, under the fly-through. */
-  callIntro() {
+  /** The opening lines for this map, in order, under the fly-through. */
+  callIntro(map) {
     this.reset();
-    return this.say('intro', { ordered: true });
+    this.map = map || null;
+    return this.say('intro', { ordered: true, map: this.map });
   }
 
   /**

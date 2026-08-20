@@ -33,16 +33,27 @@ A kill that leaves a side on their last player calls `last` rather than
 `elim`: it is the more interesting fact, and saying both would be two lines
 about one event.
 
-## The intro runs 24.4 seconds
+## One opening per map
 
-Three lines in order, so `MATCH.introDuration` in `shared/constants.js` is
-26 seconds and the fly-through stretches to fill it. Shorten one and the other
-has to follow, or the camera lands before the booth stops talking.
+An `intro` clip can name a `map`, and then it is only ever heard there. A clip
+with no `map` suits any of them.
+
+| map       | lines | spoken | window |
+|-----------|-------|--------|--------|
+| `estate`  | 3     | 24.8s  | 26.0s  |
+| `skyline` | 2     | 16.0s  | 17.5s  |
+
+The window is the map's own `introDuration`, set in its builder — the estate
+falls back to `MATCH.introDuration` in `shared/constants.js`. The fly-through
+stretches to fill whatever the window is, so lines and window move together:
+add a line and the camera has to be given longer, or it lands before the booth
+stops talking. `npm run check` fails if a map's lines no longer fit.
 
 ## Adding more
 
     { "id": "elim_vanguard_4", "file": "elim_vanguard_4.mp3",
       "slot": "elim", "team": 0, "seconds": 2.4, "text": "..." }
 
-`seconds` is only used to keep an intro line inside the fly-through. `text` is
-never read by the game — it is there so you can tell the files apart.
+`seconds` is only used to keep an intro line inside the fly-through, and
+`map` only applies to `intro`. `text` is never read by the game — it is there
+so you can tell the files apart.
